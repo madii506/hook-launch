@@ -1,0 +1,1 @@
+{ "functions": { "api/hook.js": { "maxDuration": 30 } }, "cleanUrls": true }

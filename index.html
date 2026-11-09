@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>hook</title>
+<meta name="description" content="Launch a coin hooked to real-world assets. Pick NVDA, TSLA, SPY, gold or BTC: 1% of every trade fills your coin's reserve, and on every green day for the asset the reserve buys your coin and burns it.">
+<meta property="og:title" content="hook"><meta property="og:description" content="Launch a coin hooked to real-world assets. Wall Street pumps, your coin burns."><meta property="og:image" content="https://hook-launch.vercel.app/og.png">
+<meta name="twitter:card" content="summary_large_image"><meta name="twitter:title" content="hook"><meta name="twitter:description" content="Launch a coin hooked to real-world assets."><meta name="twitter:image" content="https://hook-launch.vercel.app/og.png"><meta name="theme-color" content="#0b0f14">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png?v=1"><link rel="icon" type="image/png" sizes="64x64" href="/favicon.png?v=1"><link rel="apple-touch-icon" href="/icon.png?v=1">
+<link rel="preload" href="/assets/fonts/interd-700.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/inter-var.woff2" as="font" type="font/woff2" crossorigin><link rel="preload" href="/assets/fonts/jbmono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/assets/h.css?v=1">
+</head>
+<body class="home">
+<div class="bgx" aria-hidden="true"></div>
+<header class="bar" id="bar">
+  <div class="tape" id="tape" aria-label="live asset prices"><div class="tape-in" id="tapeIn"></div></div>
+  <div class="acct" id="acct">
+    <button class="btn sm gold" id="connect">Connect</button>
+    <button class="wbtn" id="wbtn" hidden><span class="pulse"></span><b id="wSol">— SOL</b><span class="av" id="wAv"></span></button>
+    <div class="drop" id="drop">
+      <div class="tot"><small>wallet · live</small><b id="dTot">—</b><span class="mono mu" id="dAddr"></span></div>
+      <div class="toks" id="dToks"></div>
+      <div class="drow"><a class="btn sm" id="dProfile" href="#/">Profile</a><a class="btn sm" href="#/console">Console</a><button class="btn sm" id="dOut">Disconnect</button></div>
+    </div>
+  </div>
+</header>
+<main id="app"></main>
+<nav class="dock" id="dock" aria-label="pages">
+  <a href="#/" data-v="home"><svg viewBox="0 0 24 24"><path d="M4 11l8-7 8 7v9h-5v-6H9v6H4z"/></svg><span>Home</span></a>
+  <a href="#/launch" data-v="launch"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg><span>Launch</span></a>
+  <a href="#/assets" data-v="assets"><svg viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg><span>Assets</span></a>
+  <a href="#/coins" data-v="coins"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M9.5 10.5h4a1.5 1.5 0 0 1 0 3h-3"/></svg><span>Coins</span></a>
+  <a href="#/burns" data-v="burns"><svg viewBox="0 0 24 24"><path d="M12 3c1 4 6 6 6 11a6 6 0 0 1-12 0c0-3 2-4 2-7 2 1 3 3 3 5 1-3 1-6 1-9z"/></svg><span>Burns</span></a>
+  <a href="#/trade" data-v="trade"><svg viewBox="0 0 24 24"><path d="M7 7h12l-3-3M17 17H5l3 3"/></svg><span>Trade</span></a>
+  <a href="#/docs" data-v="docs"><svg viewBox="0 0 24 24"><path d="M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7"/></svg><span>Docs</span></a>
+</nav>
+<div class="modal" id="modal"><div class="mcard" id="mCard"></div></div>
+<div class="toast" id="toast"></div>
+<script src="/assets/h.js?v=1"></script>
+</body>
+</html>
