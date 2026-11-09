@@ -1,0 +1,33 @@
+{
+ "name": "hook",
+ "pad": null,
+ "pull": { "min": 1, "max": 10, "def": 3 },
+ "capPct": 50,
+ "minMovePct": 0.1,
+ "assets": [
+  { "sym": "SPY", "name": "S&P 500", "kind": "index", "tok": "SPYx", "mint": "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W" },
+  { "sym": "QQQ", "name": "Nasdaq-100", "kind": "index", "tok": "QQQx", "mint": "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ" },
+  { "sym": "NVDA", "name": "Nvidia", "kind": "stock", "tok": "NVDAx", "mint": "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh" },
+  { "sym": "TSLA", "name": "Tesla", "kind": "stock", "tok": "TSLAx", "mint": "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB" },
+  { "sym": "AAPL", "name": "Apple", "kind": "stock", "tok": "AAPLx", "mint": "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp" },
+  { "sym": "MSFT", "name": "Microsoft", "kind": "stock", "tok": "MSFTx", "mint": "XspzcW1PRtgf6Wj92HCiZdjzKCyFekVD8P5Ueh3dRMX" },
+  { "sym": "GOOGL", "name": "Alphabet", "kind": "stock", "tok": "GOOGLx", "mint": "XsCPL9dNWBMvFtTmwcCA5v3xWPSMEBCszbQdiLLq6aN" },
+  { "sym": "META", "name": "Meta", "kind": "stock", "tok": "METAx", "mint": "Xsa62P5mvPszXL1krVUnU5ar38bBSVcWAB6fmPCo5Zu" },
+  { "sym": "AMZN", "name": "Amazon", "kind": "stock", "tok": "AMZNx", "mint": "Xs3eBt7uRfJX8QUs4suhyU8p2M6DoUDrJyWBa8LLZsg" },
+  { "sym": "AVGO", "name": "Broadcom", "kind": "stock", "tok": "AVGOx", "mint": "XsgSaSvNSqLTtFuyWPBhK9196Xb9Bbdyjj4fH3cPJGo" },
+  { "sym": "AMD", "name": "AMD", "kind": "stock", "tok": "AMDx", "mint": "XsXcJ6GZ9kVnjqGsjBnktRcuwMBmvKWh8S93RefZ1rF" },
+  { "sym": "PLTR", "name": "Palantir", "kind": "stock", "tok": "PLTRx", "mint": "XsoBhf2ufR8fTyNSjqfU71DYGaE6Z3SUGAidpzriAA4" },
+  { "sym": "NFLX", "name": "Netflix", "kind": "stock", "tok": "NFLXx", "mint": "XsEH7wWfJJu2ZT3UCFeVfALnVA6CP5ur7Ee11KmzVpL" },
+  { "sym": "ORCL", "name": "Oracle", "kind": "stock", "tok": "ORCLx", "mint": "XsjFwUPiLofddX5cWFHW35GCbXcSu1BCUGfxoQAQjeL" },
+  { "sym": "JPM", "name": "JPMorgan", "kind": "stock", "tok": "JPMx", "mint": "XsMAqkcKsUewDrzVkait4e5u4y8REgtyS7jWgCpLV2C" },
+  { "sym": "LLY", "name": "Eli Lilly", "kind": "stock", "tok": "LLYx", "mint": "Xsnuv4omNoHozR6EEW5mXkw8Nrny5rB3jVfLqi6gKMH" },
+  { "sym": "COIN", "name": "Coinbase", "kind": "stock", "tok": "COINx", "mint": "Xs7ZdzSHLU9ftNJsii5fCeJhoRWSC32SQGzGQtePxNu" },
+  { "sym": "HOOD", "name": "Robinhood", "kind": "stock", "tok": "HOODx", "mint": "XsvNBAYkrDRNhA7wPHQfX3ZUXZyZLdnCQDfHZ56bzpg" },
+  { "sym": "MSTR", "name": "Strategy", "kind": "stock", "tok": "MSTRx", "mint": "XsP7xzNPvEHS1m6qfanPUGjNmdnmsLKEoNAnHjdxxyZ" },
+  { "sym": "CRCL", "name": "Circle", "kind": "stock", "tok": "CRCLx", "mint": "XsueG8BtpquVJX9LVLLEGuViXUungE6WmK5YZ3p3bd1" },
+  { "sym": "GOLD", "name": "Gold", "kind": "gold", "tok": "GLDx", "mint": "Xsv9hRk1z5ystj9MhnA7Lq4vjSsLwzL2nxrwmwtD3re" },
+  { "sym": "BTC", "name": "Bitcoin", "kind": "crypto", "tok": "cbBTC", "mint": "cbbtcf3aa214zXHbiAZQwf4122FBYbraNdFqgw4iMij" },
+  { "sym": "ETH", "name": "Ether", "kind": "crypto", "tok": "WETH", "mint": "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs" },
+  { "sym": "SOL", "name": "Solana", "kind": "crypto", "tok": "SOL", "mint": "So11111111111111111111111111111111111111112" }
+ ]
+}
