@@ -1,0 +1,398 @@
+// hook: launch a coin hooked to real-world assets. Everything here is read live: Jupiter (asset prices, swaps), Raydium LaunchLab (coins, curves, candles, trades), Solana (wallets, profiles, the burn log).
+(() => {
+  const $ = (s, e = document) => e.querySelector(s), $$ = (s, e = document) => [...e.querySelectorAll(s)];
+  const RM = matchMedia('(prefers-reduced-motion: reduce)').matches, JUP = 'https://lite-api.jup.ag', SOL = 'So11111111111111111111111111111111111111112', HIST = 'https://launch-history-v1.raydium.io';
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const usd = (x, d) => x == null || !isFinite(x) ? '—' : '$' + (+x).toLocaleString('en-US', { minimumFractionDigits: d ?? (Math.abs(x) >= 1 ? 2 : 4), maximumFractionDigits: d ?? (Math.abs(x) >= 1 ? 2 : 6) });
+  const big = x => x == null || !isFinite(x) ? '—' : x >= 1e9 ? '$' + (x / 1e9).toFixed(2) + 'B' : x >= 1e6 ? '$' + (x / 1e6).toFixed(2) + 'M' : x >= 1e3 ? '$' + (x / 1e3).toFixed(1) + 'K' : usd(x, x < 10 ? 2 : 0);
+  const kfmt = x => x == null || !isFinite(x) ? '—' : x >= 1e9 ? (x / 1e9).toFixed(2) + 'B' : x >= 1e6 ? (x / 1e6).toFixed(x >= 1e7 ? 1 : 2).replace(/\.?0+$/, '') + 'M' : x >= 1e3 ? (x / 1e3).toFixed(x >= 1e5 ? 0 : 1).replace(/\.0$/, '') + 'K' : String(Math.round(x));
+  const spct = (x, d = 2) => x == null || !isFinite(x) ? '—' : (x >= 0 ? '+' : '−') + Math.abs(x).toFixed(d) + '%', cls = x => x == null ? 'mu' : x < 0 ? 'dn' : 'up';
+  const num = (x, d = 4) => x == null || !isFinite(x) ? '—' : (+x).toLocaleString('en-US', { maximumFractionDigits: x >= 1000 ? 2 : d });
+  const sol = (x, d = 3) => x == null || !isFinite(x) ? '—' : (+x).toLocaleString('en-US', { maximumFractionDigits: d }) + ' SOL';
+  const short = a => a ? a.slice(0, 4) + '…' + a.slice(-4) : '', clamp = (v, a = 0, b = 1) => Math.max(a, Math.min(b, v));
+  const ago = t => { const s = Date.now() / 1000 - t; return s < 60 ? 'just now' : s < 3600 ? Math.floor(s / 60) + 'm ago' : s < 86400 ? Math.floor(s / 3600) + 'h ago' : Math.floor(s / 86400) + 'd ago'; };
+  const setT = (sel, v) => { const el = typeof sel === 'string' ? $(sel) : sel; if (el) el.textContent = v; };
+  function toast(m) { const t = $('#toast'); t.innerHTML = m; t.classList.add('on'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('on'), 4200); }
+  async function api(a, q = '') { const r = await fetch('/api/hook?a=' + a + q); const j = await r.json().catch(() => ({ error: 'bad response' })); if (!r.ok || j.error) throw new Error(j.error || r.statusText); return j; }
+  async function post(a, b) { const r = await fetch('/api/hook?a=' + a, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) }); const j = await r.json().catch(() => ({ error: 'bad response' })); if (!r.ok || j.error) throw new Error(j.error || r.statusText); return j; }
+  const b64 = u => { let s = ''; u.forEach(c => s += String.fromCharCode(c)); return btoa(s); }, unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  let w3 = null; const web3 = () => w3 || (w3 = new Promise((ok, no) => { if (window.solanaWeb3) return ok(window.solanaWeb3); const s = document.createElement('script'); s.src = '/assets/web3.min.js'; s.onload = () => ok(window.solanaWeb3); s.onerror = () => no(new Error('could not load the signer')); document.head.append(s); }));
+  const tsx = sig => `<a href="https://solscan.io/tx/${sig}" target="_blank" rel="noopener">${short(sig)} ↗</a>`;
+  const app = () => $('#app');
+
+  // ---------------------------------------------------------------- the look: every asset has a tile colour (the banner's rows), the hook mark
+  const HUES = [[224, 82, 68], [42, 40, 90], [40, 95, 62], [262, 82, 74], [350, 84, 70], [168, 62, 56]];
+  const KIND = { index: 'index', stock: 'stock', gold: 'gold', crypto: 'crypto' };
+  const colOf = sym => { const A = assetList(), i = Math.max(0, A.findIndex(a => a.sym === sym)), h = HUES[i % HUES.length]; return `hsl(${h[0] + ((i * 7) % 11) - 5} ${h[1]}% ${h[2]}%)`; };
+  const HOOK = (c1 = '#eef1f6', c2 = '#ffd24d') => `<svg viewBox="17 6 68 86" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g transform="translate(12 4)"><circle cx="58" cy="15" r="7.5" stroke="${c1}" stroke-width="7"/><path d="M58 23 V64 a20 20 0 0 1 -40 0 V48" stroke="${c1}" stroke-width="8.5"/><path d="M10 56 L18 46 L26 56" stroke="${c2}" stroke-width="8.5"/></g></svg>`;
+  const ARROW = '<svg viewBox="0 0 11 8"><path d="M1 7 L5.5 2 L10 7" fill="none" stroke="#0b0f14" stroke-width="2.2" stroke-linecap="square"/></svg>';
+  const FIRE = '<svg viewBox="0 0 24 24"><path d="M12 3c1 4 6 6 6 11a6 6 0 0 1-12 0c0-3 2-4 2-7 2 1 3 3 3 5 1-3 1-6 1-9z"/></svg>';
+  const badge = c => c.asset ? `<span class="hb" style="background:${colOf(c.asset)}">${esc(c.asset)} · ${c.pull || '—'}x</span>` : '';
+  const sq = (sym, s = 38) => `<span class="sq" style="background:${colOf(sym)};width:${s}px;height:${s}px">${esc(sym)}</span>`;
+
+  // ---------------------------------------------------------------- state
+  const S = { m: null, coins: null, ledger: null, res: null, profiles: null, me: null };
+  const solUsd = () => S.m && S.m.sol && S.m.sol.usd || null;
+  const assetList = () => (S.m && S.m.assets) || [];
+  const assetBy = sym => assetList().find(a => a.sym === sym) || null;
+  const CAPP = () => (S.m && S.m.capPct) || 50, MINM = () => (S.m && S.m.minMovePct) || .1;
+  const spendPct = (ch, pull) => ch == null || ch < MINM() ? 0 : Math.min(CAPP(), ch * pull);
+  const coinList = () => (S.coins && S.coins.coins) || [];
+  const coinBy = m => coinList().find(c => c.mint === m) || null;
+  const statusTxt = h => h ? ({ armed: `armed · ${h.spendPct.toFixed(1)}%`, 'hooked today': 'hooked today', filling: 'filling', 'reserve too small': 'filling', 'no price': 'no price', unhooked: '—' }[h.status] || h.status) : '—';
+  const statusCls = h => !h ? '' : h.status === 'armed' ? 'armed' : h.status === 'hooked today' ? 'hkd' : 'filling';
+
+  // ---------------------------------------------------------------- wallet: connect, live balance, profile
+  const WL = { pk: null, p: null, name: '', view: null };
+  const avatarHtml = (p, w) => p && p.avatar ? `<img src="${esc(p.avatar)}" alt="" onerror="this.remove()">` : esc(((p && p.name) || w || '?').replace(/[^A-Za-z0-9]/g, '').slice(0, 1).toUpperCase() || '?');
+  const providers = () => [['Phantom', window.phantom && window.phantom.solana], ['Solflare', window.solflare && window.solflare.isSolflare && window.solflare], ['Backpack', window.backpack]].filter(([, p]) => p);
+  async function connect() { if (WL.pk) return WL.pk; const ps = providers(); if (!ps.length) { toast('No Solana wallet found. Open this page in Phantom, Solflare or Backpack.'); throw new Error('no wallet'); }
+    const [name, p] = ps[0]; const r = await p.connect(); onConnect(((r && r.publicKey) || p.publicKey).toString(), p, name); return WL.pk; }
+  function onConnect(pk, p, name) { WL.pk = pk; WL.p = p; WL.name = name; $('#connect').hidden = true; $('#wbtn').hidden = false; setT('#dAddr', short(pk)); $('#dProfile').href = '#/u/' + pk;
+    if (p.on && !p._hook) { p._hook = 1; p.on('accountChanged', k => { if (k) { onConnect(k.toString(), p, name); toast('Switched to ' + short(k.toString())); } else disconnect(); }); }
+    refreshWallet(); loadMe(); cur = null; render(); }
+  async function disconnect() { try { await WL.p.disconnect(); } catch (e) { } WL.pk = null; WL.view = null; S.me = null; $('#connect').hidden = false; $('#wbtn').hidden = true; $('#drop').classList.remove('on'); cur = null; render(); }
+  function countTo(el, v, fmt) { if (!el || v == null) return; const from = el._v ?? v; el._v = v; if (RM || from === v) { el.textContent = fmt(v); return; } const t0 = performance.now(); cancelAnimationFrame(el._r); const st = n => { const k = clamp((n - t0) / 900); el.textContent = fmt(from + (v - from) * (1 - Math.pow(1 - k, 3))); if (k < 1) el._r = requestAnimationFrame(st); }; el._r = requestAnimationFrame(st); }
+  const tokRow = t => `<div class="tok">${t.icon ? `<img src="${esc(t.icon)}" alt="" onerror="this.outerHTML='<span class=ph></span>'">` : '<span class="ph"></span>'}<span><b>${esc(t.symbol)}</b><small>${esc(t.name)}</small></span><span class="v">${num(t.amount)}<small>${usd(t.usd, 2)}</small></span></div>`;
+  async function refreshWallet() { if (!WL.pk) return; try { const v = await api('wallet', '&addr=' + WL.pk); if (v.wallet !== WL.pk) return; const prev = WL.view; WL.view = v;
+      countTo($('#wSol'), v.sol, x => x.toFixed(3) + ' SOL'); countTo($('#dTot'), v.totalUsd, x => usd(x, 2));
+      $('#dToks').innerHTML = `<div class="tok"><span class="ph"></span><span><b>SOL</b><small>Solana</small></span><span class="v">${num(v.sol)}<small>${usd(v.solValue, 2)}</small></span></div>` + v.tokens.slice(0, 30).map(tokRow).join('');
+      if (prev && Math.abs(prev.sol - v.sol) > 1e-9) toast(`Balance updated: ${v.sol >= prev.sol ? '+' : '−'}${Math.abs(v.sol - prev.sol).toFixed(4)} SOL`);
+      $$('[data-live="bal"]').forEach(el => el.dispatchEvent(new Event('bal'))); } catch (e) { } }
+  async function loadMe() { if (!WL.pk) return; try { S.me = (await api('profile', '&wallet=' + WL.pk)).profile; } catch (e) { S.me = null; } $('#wAv').innerHTML = avatarHtml(S.me, WL.pk); }
+  function walletInit() { $('#connect').onclick = () => connect().catch(() => { }); $('#wbtn').onclick = e => { e.stopPropagation(); $('#drop').classList.toggle('on'); }; $('#dOut').onclick = disconnect;
+    document.addEventListener('click', e => { if (!e.target.closest('#acct')) $('#drop').classList.remove('on'); }); $$('#drop a').forEach(a => a.addEventListener('click', () => $('#drop').classList.remove('on')));
+    const ps = providers(); if (ps.length && ps[0][1].connect) ps[0][1].connect({ onlyIfTrusted: true }).then(r => { if (r && r.publicKey) onConnect(r.publicKey.toString(), ps[0][1], ps[0][0]); }).catch(() => { });
+    setInterval(refreshWallet, 10000); }
+  async function signSend(list, st, versioned) { const W = await web3(); const txs = list.map(t => versioned ? W.VersionedTransaction.deserialize(unb64(t)) : W.Transaction.from(unb64(t)));
+    st('check your wallet…'); const signed = WL.p.signAllTransactions && txs.length > 1 ? await WL.p.signAllTransactions(txs) : [await WL.p.signTransaction(txs[0])];
+    st('sending…'); const r = await post('send', { txs: signed.map(t => b64(t.serialize())) }); setTimeout(refreshWallet, 1500); setTimeout(refreshWallet, 6000); return r; }
+  const stat = sel => (m, c = '') => { const el = typeof sel === 'string' ? $(sel) : sel; if (!el) return; el.className = 'stat2 ' + c; el.innerHTML = m; };
+
+  // ---------------------------------------------------------------- data
+  async function loadMarket() { try { S.m = await api('market'); } catch (e) { } }
+  async function loadCoins() { try { S.coins = await api('coins'); } catch (e) { S.coins = S.coins || { open: false, coins: [], error: true }; } }
+  async function loadLedger() { try { S.ledger = await api('ledger'); } catch (e) { S.ledger = S.ledger || { entries: [] }; } try { S.res = await api('reserves'); } catch (e) { } }
+  async function loadSocial() { try { S.profiles = (await api('profiles')).profiles; } catch (e) { S.profiles = S.profiles || []; } }
+
+  // ---------------------------------------------------------------- the tape (top bar) and the asset wall (hero)
+  function renderTape() { const A = assetList(); if (!A.length) return; const one = A.map(a => `<a class="tk" href="#/a/${a.sym}"><i style="background:${colOf(a.sym)}"></i><b>${esc(a.sym)}</b>${usd(a.usd, a.usd >= 1000 ? 0 : 2)}<span class="${cls(a.ch24)}">${spct(a.ch24)}</span></a>`).join('');
+    const el = $('#tapeIn'); if (el._n === A.map(a => a.sym + a.usd + a.ch24).join()) return; el._n = A.map(a => a.sym + a.usd + a.ch24).join(); el.innerHTML = one + one; }
+  function renderWall() { const el = $('#wall'); if (!el) return; const A = assetList(); if (!A.length) { if (!el.children.length) el.innerHTML = Array.from({ length: 24 }, (_, i) => `<div class="at shown" style="background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.08);--o:${(.25 + .75 * ((i % 6) / 5)).toFixed(2)}"></div>`).join(''); return; }
+    const fresh = !el.querySelector('[data-s]');
+    const narrow = innerWidth <= 1000, cols = narrow ? 8 : 4, rows = narrow ? 3 : 6, order = [];
+    // one hue per row, like the banner: asset k has hue k % 6, so row r holds assets r, r+6, r+12, r+18
+    if (!narrow) { for (let r = 0; r < 6; r++) for (let c = 0; c < 4; c++) order.push(A[r + c * 6]); } else { for (let r = 0; r < 3; r++) for (let c = 0; c < 8; c++) order.push(A[(c % 4) * 6 + r * 2 + (c >= 4 ? 1 : 0)]); }
+    el.innerHTML = order.filter(Boolean).map((a, i) => { const col = i % cols, o = .28 + .72 * Math.pow(col / (cols - 1), 1.1), g = a.ch24 != null && a.ch24 >= MINM();
+      return `<a class="at ${g ? 'green' : ''} ${fresh ? '' : 'shown'}" data-s="${a.sym}" href="#/a/${a.sym}" style="background:${colOf(a.sym)};--o:${o.toFixed(2)};--dl:${(i % 7) * .4}s;transition-delay:${fresh ? (i * 35) + 'ms' : '0s'}" title="${esc(a.name)}"><b>${esc(a.sym)}</b>${g ? ARROW : ''}<span>${spct(a.ch24, 1)}</span></a>`; }).join('');
+    if (fresh) requestAnimationFrame(() => requestAnimationFrame(() => $$('.at', el).forEach(t => t.classList.add('shown')))); }
+  function renderPill() { const el = $('#greenPill'); if (!el || !S.m) return; el.innerHTML = S.m.read ? `<b>${S.m.green}</b> of ${S.m.read} assets green right now` : 'reading the markets…'; }
+
+  // ---------------------------------------------------------------- the home page
+  const steps = () => `<div class="steps">
+    <div class="card step rv"><div class="viz"><svg viewBox="0 0 320 150"><rect x="26" y="45" width="64" height="64" rx="12" fill="#5b7cfa" stroke="#fff" stroke-width="3"/><text x="58" y="82" text-anchor="middle" font-family="JB" font-weight="800" font-size="14" fill="#0b0f14">NVDA</text>
+      <path class="vz-dash" d="M96 77 H150" stroke="#ffd24d" stroke-width="2.5" fill="none"/><g transform="translate(138 30)">${HOOK().replace('<svg', '<svg width="68" height="86"')}</g><path class="vz-dash" d="M214 77 H246" stroke="#ffd24d" stroke-width="2.5" fill="none"/>
+      <circle cx="276" cy="77" r="27" fill="#ffd24d"/><text x="276" y="82" text-anchor="middle" font-family="JB" font-weight="800" font-size="12" fill="#0b0f14">$YOU</text></svg></div>
+      <span class="n">01</span><h3>Hook it</h3><p>Launch a coin and hook it to one real-world asset: a stock, an index, gold or crypto. It's written into the coin's metadata at launch and never changes.</p></div>
+    <div class="card step rv d1"><div class="viz"><svg viewBox="0 0 320 150">${[0, 1, 2, 3].map(i => `<g class="vz-drop" style="animation-delay:${i * .4}s"><rect x="${40 + i * 62}" y="22" width="42" height="22" rx="6" fill="rgba(255,255,255,.1)"/><text x="${61 + i * 62}" y="37" text-anchor="middle" font-family="JB" font-size="10" font-weight="700" fill="#ffd24d">1%</text></g>`).join('')}
+      <rect x="30" y="96" width="260" height="26" rx="8" fill="rgba(255,255,255,.07)"/><rect class="vz-fill" x="30" y="96" width="260" height="26" rx="8" fill="#ffd24d"/><text x="160" y="140" text-anchor="middle" font-family="JB" font-size="11" fill="#8a94a3">the coin's reserve</text></svg></div>
+      <span class="n">02</span><h3>Fill it</h3><p>Every buy and every sell on the curve pays 1%. All of it is counted to that coin's own reserve. Nothing goes to the creator, nothing to hook.</p></div>
+    <div class="card step rv d2"><div class="viz"><svg viewBox="0 0 320 150"><rect x="26" y="45" width="64" height="64" rx="12" fill="#5b7cfa" stroke="#fff" stroke-width="3"/><text x="58" y="74" text-anchor="middle" font-family="JB" font-weight="800" font-size="14" fill="#0b0f14">NVDA</text><text class="vz-up" x="58" y="94" text-anchor="middle" font-family="JB" font-weight="700" font-size="12" fill="#0b0f14">▲ green</text>
+      <path class="vz-dash" d="M96 77 H210" stroke="#3ddc84" stroke-width="2.5" fill="none"/><g class="vz-pull"><circle cx="252" cy="80" r="27" fill="#ffd24d"/><text x="252" y="85" text-anchor="middle" font-family="JB" font-weight="800" font-size="12" fill="#0b0f14">$YOU</text></g>
+      <path class="vz-burn" d="M252 30c3 9 13 13 13 24a13 13 0 0 1-26 0c0-7 4-9 4-15 4 2 6 6 6 10 2-6 3-12 3-19z" fill="#ff7a45"/></svg></div>
+      <span class="n">03</span><h3>Pull it</h3><p>On a day the asset is green, the reserve spends the move × your pull, buys your coin and burns it. Once a day, up to half the reserve.</p></div></div>`;
+  const FAQ = [
+    ['What does "hooked" mean?', 'Your coin is tied to one real-world asset you pick at launch. The asset and the pull are written into the coin\'s on-chain metadata, so anyone can read them and nobody can change them.'],
+    ['Where does the money for the burns come from?', 'From the coin\'s own trading. hook is a launchpad on Raydium LaunchLab with a 1% platform fee, and every bit of that 1% is counted to the coin that traded. That\'s its reserve.'],
+    ['How much burns on a green day?', 'The asset\'s 24h move × the pull, as a share of the reserve, up to 50%. NVDA up 2% with a 5x pull spends 10% of the reserve. If the asset is flat or red, nothing is spent and the reserve keeps filling.'],
+    ['How do I know a burn really happened?', 'Every hook is one Solana transaction: the buy through Jupiter, the burn and a memo naming the coin, the asset and the move. The burn log lists them all, with proof of reserves next to it.'],
+    ['Where do the prices come from?', 'From each asset\'s token on Solana, read from Jupiter: xStocks for stocks, indexes and gold, cbBTC for bitcoin, wrapped ETH and SOL. Dexscreener fills in if Jupiter misses one.'],
+    ['Is this financial advice? Is it affiliated with the companies?', 'No and no. hook doesn\'t own or sell any stock. A hooked coin is a memecoin whose burns follow an asset\'s daily move. It isn\'t affiliated with any company, index or issuer.']];
+  const faqHtml = () => `<div class="faq">${FAQ.map(([q, a], i) => `<details class="card qa rv ${i % 2 ? 'd1' : ''}"><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</div>`;
+  function home() { return `<div class="wrap herowrap"><div class="hero">
+      <div class="hl"><div class="pill"><i></i><span id="greenPill">reading the markets…</span></div>
+        <h1>launch a coin<br>hooked to<br><span>real&#8209;world assets.</span></h1>
+        <p class="sub">Wall Street pumps, your coin burns.</p>
+        <div class="ctas"><a class="btn gold" href="#/launch">Launch a coin</a><button class="btn" data-go="how">How it works</button></div></div>
+      <div class="wall" id="wall"></div></div><div class="scrollcue">scroll<i></i></div></div>
+    <div class="wrap">
+    <section id="how"><div class="shead rv"><div><span class="kick">how it works</span><h2>Three steps. <em>One signature.</em></h2></div><a class="btn" href="#/docs">Read the docs</a></div>${steps()}</section>
+    <section><div class="shead rv"><div><span class="kick">the pull</span><h2>Try it on <em>today's market.</em></h2><p class="lede">Live 24h moves. Pick an asset and a pull and see what its reserve would spend today.</p></div></div>
+      <div class="card calc rv"><div class="l">
+        <div class="blk"><div class="lbl">the asset <b id="cA">—</b></div><div class="chips" id="cChips"></div></div>
+        <div class="blk"><div class="lbl">the pull <b id="cP">3x</b></div><input type="range" class="rng" id="cPull" min="1" max="10" step="1" value="3" aria-label="pull"><div class="ticks"><span>1x</span><span>5x</span><span>10x</span></div></div>
+        <div class="blk" style="margin:0"><div class="lbl">the coin's reserve</div><div style="display:flex;gap:10px;align-items:center"><input class="in" id="cRes" value="1" inputmode="decimal" aria-label="reserve in SOL" style="max-width:160px"><span class="mono mu">SOL</span></div></div></div>
+        <div class="r"><div class="lbl">today's hook would spend</div><div class="out-big" id="cOut">—</div><div class="out-sub" id="cSub"></div><div class="bars" id="cBars"></div></div></div></section>
+    <section><div class="shead rv"><div><span class="kick">right now</span><h2>Who's green <em>today.</em></h2></div><span class="mono mu" id="mvAt"></span></div>
+      <div class="card movers rv"><div class="mvh"><span>asset</span><span>red</span><span>green</span><span>24h</span></div><div id="movers"><div class="empty">reading the markets…</div></div></div></section>
+    <section><div class="shead rv"><div><span class="kick">live</span><h2>On hook <em>now.</em></h2></div><a class="btn" href="#/coins">Every coin</a></div>
+      <div class="stats rv" id="stats"></div>
+      <div class="two" style="margin-top:16px"><div class="card rv"><div class="ch"><h3>Newest coins</h3><a href="#/coins">all →</a></div><div class="rows" id="newCoins"><div class="empty">reading the launchpad…</div></div></div>
+        <div class="card rv d1"><div class="ch"><h3>Latest burns</h3><a href="#/burns">burn log →</a></div><div class="rows" id="newBurns"><div class="empty">reading the burn log…</div></div></div></div></section>
+    <section><div class="shead rv"><div><span class="kick">faq</span><h2>Good <em>questions.</em></h2></div></div>${faqHtml()}</section>
+    <div class="final rv"><h2>hook your coin.</h2><p>Pick an asset. Set the pull. Sign once.</p><a class="btn gold" href="#/launch" style="height:54px;padding:0 28px;font-size:16px">Launch a coin</a></div></div>`; }
+
+  // the calculator
+  const CL = { sym: null, pull: 3, res: 1 };
+  function calcInit() { if (!$('#cChips')) return; $('#cPull').oninput = e => { CL.pull = +e.target.value; renderCalc(); }; $('#cRes').oninput = e => { CL.res = Math.max(0, +e.target.value || 0); renderCalc(); };
+    $('#cChips').onclick = e => { const b = e.target.closest('.chip'); if (b) { CL.sym = b.dataset.s; renderCalc(); } }; renderCalc(); }
+  function renderCalc() { const ch = $('#cChips'); if (!ch) return; const A = assetList(); if (!A.length) return;
+    if (!CL.sym) CL.sym = ([...A].filter(a => a.ch24 != null).sort((x, y) => y.ch24 - x.ch24)[0] || A[0]).sym;
+    const pick = ['NVDA', 'TSLA', 'SPY', 'QQQ', 'AAPL', 'MSTR', 'COIN', 'GOLD', 'BTC', 'ETH', 'SOL']; if (!pick.includes(CL.sym)) pick.unshift(CL.sym);
+    ch.innerHTML = pick.map(s => { const a = assetBy(s); return a ? `<button class="chip ${s === CL.sym ? 'on' : ''}" data-s="${s}">${s} <small class="${s === CL.sym ? '' : cls(a.ch24)}">${spct(a.ch24, 1)}</small></button>` : ''; }).join('');
+    const a = assetBy(CL.sym), p = spendPct(a && a.ch24, CL.pull), r = $('#cPull'); r.style.setProperty('--p', (CL.pull - 1) / 9 * 100 + '%'); setT('#cA', a ? a.name : '—'); setT('#cP', CL.pull + 'x');
+    setT('#cOut', p > 0 ? p.toFixed(p < 10 ? 2 : 1) + '%' : '0%'); $('#cOut').style.color = p > 0 ? 'var(--gold)' : 'var(--mu)';
+    $('#cSub').innerHTML = !a || a.ch24 == null ? 'reading the price…' : p > 0 ? `${esc(a.sym)} is <b class="up">${spct(a.ch24)}</b> in 24h. × ${CL.pull} = <b>${p.toFixed(2)}%</b>${p >= CAPP() ? ' (the cap)' : ''} of the reserve: <b>${num(CL.res * p / 100, 4)} SOL</b> buys the coin and burns it.` : `${esc(a.sym)} is <b class="${cls(a.ch24)}">${spct(a.ch24)}</b> in 24h. Not a green day: nothing is spent, the reserve keeps filling.`;
+    const bars = Array.from({ length: 10 }, (_, i) => { const v = spendPct(a && a.ch24, i + 1); return `<i class="${i + 1 === CL.pull ? 'on' : ''}" style="height:${Math.max(2, v / CAPP() * 100)}%"><em>${i + 1}x</em></i>`; }).join('');
+    $('#cBars').innerHTML = bars + `<div class="cap" style="top:18px"><span>cap ${CAPP()}%</span></div>`; }
+  function renderMovers() { const el = $('#movers'); if (!el) return; const A = assetList().filter(a => a.ch24 != null).sort((x, y) => y.ch24 - x.ch24); if (!A.length) return;
+    const mx = Math.max(1, ...A.map(a => Math.abs(a.ch24)));
+    el.innerHTML = A.map(a => `<a class="mv" href="#/a/${a.sym}"><span class="nm"><i style="background:${colOf(a.sym)}"></i><b>${esc(a.sym)}</b></span><span class="neg"><i style="width:${a.ch24 < 0 ? Math.abs(a.ch24) / mx * 100 : 0}%"></i></span><span class="pos"><i style="width:${a.ch24 > 0 ? a.ch24 / mx * 100 : 0}%"></i></span><span class="v ${cls(a.ch24)}">${spct(a.ch24)}</span></a>`).join('');
+    setT('#mvAt', `${A.filter(a => a.ch24 >= MINM()).length} green · ${A.filter(a => a.ch24 < MINM()).length} not · Jupiter, 24h`); }
+  function renderStats() { const el = $('#stats'); if (!el) return; const c = S.coins, T = c && c.totals;
+    const cell = (k, v, e) => `<div class="card stat"><small>${k}</small><b>${v}</b><em>${e}</em></div>`;
+    el.innerHTML = c && c.open ? cell('coins hooked', T.coins, `${T.graduated} graduated`) + cell('in reserves', num(T.reserveSol, 3) + ' SOL', usd(T.reserveSol * (solUsd() || 0), 0)) + cell('hooks run', T.hooks, `${T.armed} armed now`) + cell('tokens burned', kfmt(T.burned), 'bought and burned')
+      : cell('coins hooked', '—', 'launchpad opening') + cell('in reserves', '—', '1% of every trade') + cell('hooks run', '—', 'one per coin per day') + cell('assets', assetList().length || 24, `${S.m ? S.m.green : '—'} green now`); }
+  const coinRow = c => `<a class="rw" href="#/c/${c.mint}"><img class="ic" src="${esc(c.image || '/coins/1.png')}" alt="" onerror="this.src='/coins/1.png'"><span><b>${esc(c.name)}</b> <span class="mu mono">$${esc(c.symbol)}</span><small>${c.asset ? `hooked to ${esc(c.asset)} · ${c.pull}x` : 'no hook'} · ${c.created ? ago(c.created / 1000) : ''}</small></span><span class="r">${big(c.mcapUsd)}<small class="st ${statusCls(c.hook)}">${statusTxt(c.hook)}</small></span></a>`;
+  const burnRow = e => { const c = coinBy(e.coin); return `<div class="rw"><span class="ic">${FIRE}</span><span><b>${c ? '$' + esc(c.symbol) : short(e.coin)}</b> <span class="mu mono">${esc(e.asset || '')} ${e.move ? spct(e.move) : ''}</span><small>${kfmt(Number(e.burned) / 1e6)} tokens burned · ${ago(e.time)}</small></span><span class="r">${num(e.sol, 4)} SOL<small>${tsx(e.sig)}</small></span></div>`; };
+  function renderLive() { const n = $('#newCoins'); if (n && S.coins) n.innerHTML = !S.coins.open ? '<div class="empty">The launchpad opens soon. The first coin shows up here.</div>' : coinList().length ? coinList().slice(0, 5).map(coinRow).join('') : '<div class="empty">No coins yet. The first one shows up here.</div>';
+    const b = $('#newBurns'); if (b && S.ledger) b.innerHTML = (S.ledger.entries || []).length ? S.ledger.entries.slice(0, 5).map(burnRow).join('') : '<div class="empty">No burns yet. The first green day after a launch shows up here.</div>'; }
+
+  // ---------------------------------------------------------------- the launcher
+  const LN = { asset: null, pull: 3, img: '1', imgUrl: null, busy: false, kind: 'all', q: '' };
+  function launchPage(arg) { if (arg && /^[A-Z]{2,6}$/.test(arg)) LN.asset = arg; return `<div class="wrap"><div class="phd"><div><span class="kick">launch</span><h1>Hook a coin.</h1><p>Pick a real-world asset, set the pull, sign once. Your coin launches on Raydium LaunchLab with its hook written into its metadata.</p></div></div>
+    <div class="lgrid"><div>
+      <div class="card panel"><h3><span>01</span>Pick the asset</h3><p class="ex">Your coin burns on this asset's green days. It's fixed at launch.</p>
+        <div class="tools"><div class="seg" id="kindSeg">${['all', 'stock', 'index', 'crypto', 'gold'].map(k => `<button data-k="${k}" class="${LN.kind === k ? 'on' : ''}">${k}</button>`).join('')}</div><input class="in" id="aSearch" placeholder="search" value="${esc(LN.q)}" aria-label="search assets"></div>
+        <div class="apick" id="apick"></div></div>
+      <div class="card panel"><h3><span>02</span>Set the pull</h3><p class="ex">How hard a green day pulls. The reserve spends the asset's 24h move × the pull, up to ${CAPP()}% in one day.</p>
+        <div class="lbl">the pull <b id="lPullV">3x</b></div><input type="range" class="rng" id="lPull" min="1" max="10" step="1" value="${LN.pull}" aria-label="pull"><div class="ticks"><span>1x · gentle</span><span>10x · hard</span></div><div class="out-sub" id="pullEx" style="margin-top:14px;min-height:0;font-size:14px"></div></div>
+      <div class="card panel"><h3><span>03</span>Make the coin</h3><p class="ex">A name, a ticker and an image. A dev buy is optional.</p>
+        <div class="row2"><label class="fld"><span>Name</span><input id="cName" maxlength="32" placeholder="Nvidia Hook"></label><label class="fld"><span>Ticker</span><input id="cSym" maxlength="10" placeholder="NHOOK"></label></div>
+        <div class="fld"><span>Image</span><div class="imgs" id="imgs"></div><input class="in" id="cImg" placeholder="or paste an https image link" style="margin-top:10px"><small id="cFileSt" class="mono mu"></small></div>
+        <label class="fld" style="margin:0"><span>Dev buy · optional, in SOL</span><input id="cBuy" inputmode="decimal" placeholder="0"></label></div>
+    </div><aside class="card prev" id="prev"></aside></div></div>`; }
+  function squareImage(file) { return new Promise((ok, no) => { const url = URL.createObjectURL(file), im = new Image(); im.onload = () => { const S2 = 512, c = document.createElement('canvas'); c.width = c.height = S2; const g = c.getContext('2d'), s = Math.min(im.naturalWidth, im.naturalHeight);
+      g.drawImage(im, (im.naturalWidth - s) / 2, (im.naturalHeight - s) / 2, s, s, 0, 0, S2, S2); URL.revokeObjectURL(url); let d = c.toDataURL(file.type === 'image/jpeg' ? 'image/jpeg' : 'image/png', .9); if (d.length * .75 > 700 * 1024) d = c.toDataURL('image/jpeg', .85); ok(d.split(',')[1]); };
+    im.onerror = () => no(new Error('could not read that image')); im.src = url; }); }
+  function launchInit() { const box = $('#imgs'); if (!box) return;
+    box.innerHTML = [1, 2, 3, 4, 5, 6].map(i => `<button data-i="${i}" aria-label="image ${i}"><img src="/coins/${i}.png" alt=""></button>`).join('') + `<label class="up" title="upload an image">+<input type="file" id="cFile" accept="image/png,image/jpeg,image/webp,image/gif" hidden></label>`;
+    box.onclick = e => { const b = e.target.closest('button'); if (!b) return; LN.img = b.dataset.i; LN.imgUrl = null; $('#cImg').value = ''; setT('#cFileSt', ''); renderLaunch(); };
+    $('#cFile').onchange = async e => { const f = e.target.files && e.target.files[0]; if (!f) return; const st = $('#cFileSt'); try { if (f.size > 12e6) throw new Error('that file is too big'); st.textContent = 'preparing…';
+        const data = await squareImage(f); st.textContent = 'uploading…'; const r = await post('upload', { data }); LN.img = r.image; LN.imgUrl = r.url; $('#cImg').value = ''; st.textContent = 'uploaded ✓'; renderLaunch(); }
+      catch (err) { st.textContent = err.message; } finally { e.target.value = ''; } };
+    ['#cName', '#cSym', '#cImg', '#cBuy'].forEach(id => $(id).addEventListener('input', () => { if (id === '#cSym') $(id).value = $(id).value.toUpperCase().replace(/[^A-Z0-9]/g, ''); if (id === '#cImg') { LN.img = $('#cImg').value.trim() || '1'; LN.imgUrl = null; setT('#cFileSt', ''); } renderLaunch(); }));
+    $('#kindSeg').onclick = e => { const b = e.target.closest('button'); if (!b) return; LN.kind = b.dataset.k; $$('#kindSeg button').forEach(x => x.classList.toggle('on', x === b)); renderPick(); };
+    $('#aSearch').oninput = e => { LN.q = e.target.value.trim().toLowerCase(); renderPick(); };
+    $('#apick').onclick = e => { const b = e.target.closest('.ap'); if (!b) return; LN.asset = b.dataset.s; renderPick(); renderLaunch(); };
+    $('#lPull').oninput = e => { LN.pull = +e.target.value; renderLaunch(); };
+    renderPick(); renderLaunch(); }
+  function renderPick() { const el = $('#apick'); if (!el) return; const A = assetList(); if (!A.length) { el.innerHTML = '<div class="empty" style="grid-column:1/-1">reading the markets…</div>'; return; }
+    if (!LN.asset) LN.asset = 'NVDA';
+    const L = A.filter(a => (LN.kind === 'all' || a.kind === LN.kind) && (!LN.q || (a.sym + ' ' + a.name).toLowerCase().includes(LN.q)));
+    el.innerHTML = L.length ? L.map(a => `<button class="ap ${a.sym === LN.asset ? 'on' : ''}" data-s="${a.sym}" style="background:${colOf(a.sym)}"><b>${esc(a.sym)}</b><small>${esc(a.name)}</small><span>${spct(a.ch24, 2)}</span></button>`).join('') : '<div class="empty" style="grid-column:1/-1">No asset matches.</div>'; }
+  function renderLaunch() { const pv = $('#prev'); if (!pv) return; const custom = /^https:\/\//.test(LN.img) || LN.img[0] === 'b'; $$('#imgs button').forEach(b => b.classList.toggle('on', !custom && b.dataset.i === LN.img));
+    const a = assetBy(LN.asset), name = $('#cName').value.trim() || 'Your coin', sym = $('#cSym').value.trim() || 'TICKER', src = LN.img[0] === 'b' ? LN.imgUrl : custom ? LN.img : `/coins/${/^[1-6]$/.test(LN.img) ? LN.img : 1}.png`, p = spendPct(a && a.ch24, LN.pull);
+    const r = $('#lPull'); r.value = LN.pull; r.style.setProperty('--p', (LN.pull - 1) / 9 * 100 + '%'); setT('#lPullV', LN.pull + 'x');
+    $('#pullEx').innerHTML = a && a.ch24 != null ? `A +1% day spends <b>${Math.min(CAPP(), LN.pull)}%</b> of the reserve. A +3% day spends <b>${Math.min(CAPP(), 3 * LN.pull)}%</b>. Today ${esc(a.sym)} is <b class="${cls(a.ch24)}">${spct(a.ch24)}</b>.` : '';
+    const open = S.m && S.m.pad, bt = !WL.pk ? 'Connect wallet' : !open ? 'Launchpad opening soon' : `Launch $${esc(sym)} →`;
+    pv.innerHTML = `<div class="pc"><img src="${esc(src || '/coins/1.png')}" alt="" onerror="this.src='/coins/1.png'"><div><b>${esc(name)}</b><small>$${esc(sym)}</small></div></div>
+      <div class="hookline"><span class="hk">${HOOK()}</span><div><small>hooked to</small><b>${a ? esc(a.sym) + ' · ' + esc(a.name) : '—'}</b></div><div style="text-align:right"><small>pull</small><b>${LN.pull}x</b></div></div>
+      ${a && a.ch24 != null ? `<div class="today ${p > 0 ? '' : 'red'}">${p > 0 ? `${esc(a.sym)} is ${spct(a.ch24)} today. With a ${LN.pull}x pull, today's hook would spend <b>${p.toFixed(2)}%</b> of the reserve.` : `${esc(a.sym)} is ${spct(a.ch24)} today. No hook on a red day: the reserve keeps filling.`}</div>` : ''}
+      <ul class="rules"><li>supply<b>1,000,000,000</b></li><li>curve<b>LaunchLab standard · ${num((S.m && S.m.raiseSol) || 85, 0)} SOL to graduate</b></li><li>reserve<b>1% of every trade</b></li><li>hook<b>once a day · up to ${CAPP()}%</b></li><li>creator fee<b>0%</b></li><li>cost<b>~0.03 SOL + dev buy</b></li></ul>
+      <button class="btn gold wide" id="launchBtn" ${LN.busy ? 'disabled' : ''}>${LN.busy ? 'Launching…' : bt}</button><div class="padst ${open ? 'open' : ''}"><i></i>${open ? 'launchpad open · ' + short(S.m.pad) : 'launchpad opening soon'}</div><div class="stat2" id="lStat">${esc(LN.msg || '')}</div>`;
+    if (LN.msgHtml) { $('#lStat').className = 'stat2 ' + (LN.msgCls || ''); $('#lStat').innerHTML = LN.msgHtml; }
+    $('#launchBtn').onclick = doLaunch; }
+  async function doLaunch() { const st = (m, c = '') => { LN.msgHtml = m; LN.msgCls = c; const el = $('#lStat'); if (el) { el.className = 'stat2 ' + c; el.innerHTML = m; } }; if (LN.busy) return;
+    try { if (!WL.pk) { await connect(); return; } if (!(S.m && S.m.pad)) { st('The hook launchpad isn’t open yet. This button lights up the moment it is.'); return; }
+      const name = $('#cName').value.trim(), symbol = $('#cSym').value.trim(); if (!LN.asset) throw new Error('Pick an asset.'); if (name.length < 2) throw new Error('Give your coin a name.'); if (symbol.length < 2) throw new Error('Give your coin a ticker.');
+      const buySol = +$('#cBuy').value || 0; LN.busy = true; renderLaunch(); st('building your launch on Raydium LaunchLab…');
+      const r = await post('buildLaunch', { wallet: WL.pk, pad: S.m.pad, name, symbol, image: LN.img, asset: LN.asset, pull: LN.pull, buySol }); const s = await signSend(r.txs, st, false);
+      st(`$${esc(symbol)} is live, hooked to ${esc(r.asset)} at ${r.pull}x.\nmint <b>${esc(r.mint)}</b>\n<a href="#/c/${r.mint}">open its page</a> · ${tsx(s.sigs[0])}`, 'ok'); setTimeout(async () => { await loadCoins(); }, 5000); }
+    catch (e) { if (e.message !== 'no wallet') st(esc(e.message || String(e)), 'err'); } finally { LN.busy = false; const h = LN.msgHtml, c = LN.msgCls; renderLaunch(); if (h) st(h, c); } }
+
+  // ---------------------------------------------------------------- assets
+  const AS = { kind: 'all' };
+  function assetsPage() { return `<div class="wrap"><div class="phd"><div><span class="kick">assets</span><h1>Hook to any of ${assetList().length || 24}.</h1><p>Stocks, indexes, gold and crypto, priced live from their tokens on Solana. Green means today is a hook day for every coin hooked to it.</p></div><div class="seg" id="asSeg">${['all', 'stock', 'index', 'crypto', 'gold'].map(k => `<button data-k="${k}" class="${AS.kind === k ? 'on' : ''}">${k}</button>`).join('')}</div></div>
+    <div class="card tbl"><div class="tr h"><span>asset</span><span>price</span><span>24h move</span><span>24h</span><span>coins hooked</span><span>today</span></div><div id="asRows"><div class="empty">reading the markets…</div></div></div>
+    <p class="mono mu" style="font-size:12px;margin-top:14px">Prices: Jupiter, from each asset's token on Solana (xStocks for stocks, indexes and gold · cbBTC · wrapped ETH · SOL). Dexscreener fills gaps.</p></div>`; }
+  function renderAssets() { const el = $('#asRows'); if (!el) return; const A = assetList().filter(a => AS.kind === 'all' || a.kind === AS.kind); if (!A.length) return; const mx = Math.max(1, ...assetList().map(a => Math.abs(a.ch24 || 0)));
+    el.innerHTML = A.map(a => { const n = coinList().filter(c => c.asset === a.sym).length, g = a.ch24 != null && a.ch24 >= MINM(), w = Math.abs(a.ch24 || 0) / mx * 50;
+      return `<a class="tr" href="#/a/${a.sym}"><span class="nm">${sq(a.sym)}<span><b>${esc(a.sym)}</b><small>${esc(a.name)} · ${esc(a.tok)}</small></span></span><span>${usd(a.usd)}</span><span class="mbar"><i style="${a.ch24 >= 0 ? `left:50%;width:${w}%;background:var(--up)` : `right:50%;width:${w}%;background:var(--dn)`}"></i></span><span class="${cls(a.ch24)}">${spct(a.ch24)}</span><span>${n}</span><span class="st ${g ? 'armed' : 'filling'}">${a.ch24 == null ? 'no price' : g ? 'hook day' : 'filling'}</span></a>`; }).join(''); }
+  function assetPage(sym) { const a = assetBy(sym); if (!a) return `<div class="wrap"><div class="card empty" style="margin-top:40px">${assetList().length ? 'Not an asset on hook. <a href="#/assets">See all assets →</a>' : 'reading the markets…'}</div></div>`;
+    const C = coinList().filter(c => c.asset === sym), E = ((S.ledger && S.ledger.entries) || []).filter(e => e.asset === sym), g = a.ch24 != null && a.ch24 >= MINM();
+    return `<div class="wrap"><div class="card chead"><span class="big" style="background:${colOf(sym)}">${esc(sym)}</span><div><h1>${esc(a.name)} <span>${esc(sym)}</span></h1><p>${g ? `Green today. Every coin hooked to ${esc(sym)} can burn.` : `Not a green day for ${esc(sym)}. Coins hooked to it keep filling.`}</p>
+      <div class="meta"><span>${esc(a.tok)} on Solana</span><a href="https://solscan.io/token/${a.mint}" target="_blank" rel="noopener">token ↗</a><span>price from ${esc(a.src || '—')}</span></div></div><div class="act"><a class="btn gold" href="#/launch/${sym}">Hook a coin to ${esc(sym)}</a></div></div>
+      <div class="kv4"><div class="card"><small>price</small><b>${usd(a.usd)}</b><em>${esc(a.tok)}</em></div><div class="card"><small>24h</small><b class="${cls(a.ch24)}">${spct(a.ch24)}</b><em>${g ? 'hook day' : 'filling'}</em></div><div class="card"><small>coins hooked</small><b>${C.length}</b><em>on hook</em></div><div class="card"><small>reserves hooked</small><b>${num(C.reduce((s, c) => s + c.reserve.sol, 0), 3)} SOL</b><em>${E.length} burns so far</em></div></div>
+      <div class="card" style="margin-bottom:16px"><div class="ch"><h3>Today, by pull</h3><span>share of a reserve one hook spends</span></div><div class="tbl"><div class="tr h" style="grid-template-columns:repeat(5,1fr);min-width:0"><span>1x</span><span>3x</span><span>5x</span><span>7x</span><span>10x</span></div><div class="tr" style="grid-template-columns:repeat(5,1fr);min-width:0">${[1, 3, 5, 7, 10].map(p => `<b class="${spendPct(a.ch24, p) ? 'gd' : 'mu'}">${spendPct(a.ch24, p).toFixed(2)}%</b>`).join('')}</div></div></div>
+      <div class="two"><div class="card"><div class="ch"><h3>Coins hooked to ${esc(sym)}</h3><span>${C.length}</span></div><div class="rows">${C.length ? C.slice(0, 12).map(coinRow).join('') : `<div class="empty">No coins hooked to ${esc(sym)} yet. <a class="gd" href="#/launch/${sym}">Be the first →</a></div>`}</div></div>
+        <div class="card"><div class="ch"><h3>Burns from ${esc(sym)}</h3><span>${E.length}</span></div><div class="rows">${E.length ? E.slice(0, 12).map(burnRow).join('') : '<div class="empty">No burns from this asset yet.</div>'}</div></div></div></div>`; }
+
+  // ---------------------------------------------------------------- coins board
+  const BD = { q: '', st: 'all', asset: '', sort: 'new' };
+  function coinsPage() { return `<div class="wrap"><div class="phd"><div><span class="kick">coins</span><h1>Every hooked coin.</h1><p>Each with its asset, its pull, its reserve and what today means for it. Read live from Raydium LaunchLab and the burn log.</p></div><a class="btn gold" href="#/launch">Launch a coin</a></div>
+    <div class="tools"><input class="in" id="bQ" placeholder="search name or ticker" value="${esc(BD.q)}" aria-label="search coins"><div class="seg" id="bSt">${[['all', 'all'], ['armed', 'armed'], ['today', 'hooked today'], ['grad', 'graduated']].map(([k, l]) => `<button data-k="${k}" class="${BD.st === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <select class="in" id="bA" style="width:auto" aria-label="asset"><option value="">every asset</option>${assetList().map(a => `<option value="${a.sym}" ${BD.asset === a.sym ? 'selected' : ''}>${a.sym}</option>`).join('')}</select>
+      <div class="seg" id="bSo">${[['new', 'new'], ['res', 'reserve'], ['mc', 'mcap'], ['burn', 'burns']].map(([k, l]) => `<button data-k="${k}" class="${BD.sort === k ? 'on' : ''}">${l}</button>`).join('')}</div><span class="mono mu" id="bCount" style="margin-left:auto;font-size:13px"></span></div>
+    <div class="grid3" id="bList"><div class="card empty" style="grid-column:1/-1">reading the launchpad…</div></div></div>`; }
+  function coinsInit() { if (!$('#bList')) return; $('#bQ').oninput = e => { BD.q = e.target.value.trim().toLowerCase(); renderBoard(); }; $('#bA').onchange = e => { BD.asset = e.target.value; renderBoard(); };
+    $('#bSt').onclick = e => { const b = e.target.closest('button'); if (!b) return; BD.st = b.dataset.k; $$('#bSt button').forEach(x => x.classList.toggle('on', x === b)); renderBoard(); };
+    $('#bSo').onclick = e => { const b = e.target.closest('button'); if (!b) return; BD.sort = b.dataset.k; $$('#bSo button').forEach(x => x.classList.toggle('on', x === b)); renderBoard(); }; renderBoard(); }
+  const card = c => `<a class="card cc" href="#/c/${c.mint}"><div class="top"><img src="${esc(c.image || '/coins/1.png')}" alt="" onerror="this.src='/coins/1.png'"><div class="t"><b>${esc(c.name)}</b><small>$${esc(c.symbol)}</small></div>${badge(c)}</div>
+    <div class="kvs"><div>reserve<b>${num(c.reserve.sol, 4)} SOL</b></div><div>market cap<b>${big(c.mcapUsd)}</b></div><div>today<b class="st ${statusCls(c.hook)}">${statusTxt(c.hook)}</b></div><div>burns<b>${c.hooks} · ${kfmt(c.burned)}</b></div></div><div class="prog"><i style="width:${clamp(c.progress / 100) * 100}%"></i></div></a>`;
+  function renderBoard() { const el = $('#bList'); if (!el || !S.coins) return; if (!S.coins.open) { el.innerHTML = '<div class="card empty" style="grid-column:1/-1">The launchpad opens soon. Every coin shows up here.</div>'; return; }
+    let L = coinList().filter(c => (!BD.q || (c.name + ' ' + c.symbol).toLowerCase().includes(BD.q)) && (!BD.asset || c.asset === BD.asset) && (BD.st === 'all' || (BD.st === 'armed' && c.hook.armed) || (BD.st === 'today' && c.hook.today) || (BD.st === 'grad' && c.graduated)));
+    const k = { new: c => c.created || 0, res: c => c.reserve.sol, mc: c => c.mcapUsd || 0, burn: c => c.burned }[BD.sort]; L = [...L].sort((x, y) => k(y) - k(x));
+    setT('#bCount', `${L.length} of ${coinList().length}`); el.innerHTML = L.length ? L.map(card).join('') : `<div class="card empty" style="grid-column:1/-1">${coinList().length ? 'No coin matches.' : 'No coins yet. <a class="gd" href="#/launch">Launch the first →</a>'}</div>`; }
+
+  // ---------------------------------------------------------------- coin page
+  function candleSvg(R) { if (!R.length) return '<div class="empty" style="margin:auto">No candles yet. The chart starts with the first trade.</div>';
+    const W = 900, H = 340, L = 8, Rt = 70, T = 14, B = 26, rows = R.slice(-90), hi = Math.max(...rows.map(r => r.h)), lo = Math.min(...rows.map(r => r.l)), top = hi * 1.02, bot = lo * .98, Y = v => T + (top - v) / (top - bot || 1) * (H - T - B), sw = (W - L - Rt) / rows.length;
+    let s = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`;
+    for (let i = 0; i < 5; i++) { const y = T + i * (H - T - B) / 4; s += `<line x1="${L}" x2="${W - Rt}" y1="${y}" y2="${y}" stroke="rgba(255,255,255,.05)"/><text x="${W - Rt + 6}" y="${y + 4}" font-family="JB, monospace" font-size="11" fill="#5f6b78">${(top - i * (top - bot) / 4).toPrecision(3)}</text>`; }
+    rows.forEach((r, i) => { const x = L + i * sw + sw / 2, up = r.c >= r.o, col = up ? '#3ddc84' : '#ff6b6b'; s += `<line x1="${x}" x2="${x}" y1="${Y(r.h)}" y2="${Y(r.l)}" stroke="${col}" stroke-width="1.2" vector-effect="non-scaling-stroke"/><rect x="${x - sw * .32}" y="${Y(Math.max(r.o, r.c))}" width="${Math.max(1, sw * .64)}" height="${Math.max(1.5, Math.abs(Y(r.o) - Y(r.c)))}" fill="${col}"/>`; });
+    return s + '</svg>'; }
+  let tradeTimer = null;
+  async function loadTrades(pool) { const el = $('#cFeed'); if (!el) return; try { const j = await fetch(`${HIST}/trade?poolId=${pool}&limit=20`).then(r => r.json()); const R = (j && j.data && j.data.rows) || [];
+      el.innerHTML = R.length ? R.map(t => `<div class="t2"><span class="s ${t.side}">${esc(t.side)}</span><span>${kfmt(+t.amountA)}</span><span>${num(+t.amountB, 4)} SOL</span><a href="https://solscan.io/tx/${esc(t.txid)}" target="_blank" rel="noopener">${ago(t.blockTime)}</a></div>`).join('') : '<div class="empty">No trades yet.</div>'; } catch (e) { el.innerHTML = '<div class="empty">Trades are on Raydium.</div>'; } }
+  async function coinPage(mint) { app().innerHTML = `<div class="wrap"><div class="card empty" style="margin-top:40px">reading the coin…</div></div>`; let d; try { d = await api('coin', '&mint=' + mint); } catch (e) { d = { coin: null, entries: [], candles: [] }; }
+    if (location.hash !== '#/c/' + mint) return; const c = d.coin, h = c && c.hook, a = c && c.asset ? assetBy(c.asset) : null;
+    app().innerHTML = `<div class="wrap">
+      <div class="card chead"><img class="big" src="${esc((c && c.image) || '/coins/1.png')}" alt="" onerror="this.src='/coins/1.png'" style="border:0"><div><h1>${c ? esc(c.name) + ' <span>$' + esc(c.symbol) + '</span>' : 'Trade ' + short(mint)}</h1><p>${c ? (c.asset ? `Hooked to ${esc(a ? a.name : c.asset)} at ${c.pull}x. Every green day for ${esc(c.asset)} buys $${esc(c.symbol)} and burns it.` : 'Launched on hook.') : 'This token is not on the hook launchpad, but you can still trade it here.'}</p>
+        <div class="meta"><span class="mono">${esc(short(mint))}</span><a href="https://raydium.io/launchpad/token/?mint=${mint}" target="_blank" rel="noopener">raydium ↗</a><a href="https://solscan.io/token/${mint}" target="_blank" rel="noopener">solscan ↗</a><a href="https://dexscreener.com/solana/${mint}" target="_blank" rel="noopener">dexscreener ↗</a><span id="hCount"></span></div></div>${c && c.asset ? `<div class="act">${badge(c).replace('class="hb"', 'class="hb" style="height:34px;padding:0 12px;font-size:13px;background:' + colOf(c.asset) + '"')}</div>` : ''}</div>
+      ${c ? `<div class="cgrid"><div class="card chart"><div class="cth"><span>15m candles · Raydium LaunchLab${d.src && d.src.includes('gecko') ? ' + pool' : ''}</span><span>price in SOL</span></div>${candleSvg(d.candles || [])}</div>
+        <div class="card hookcard"><span class="note">the hook, today</span><div class="big2 ${cls(h.asset && h.asset.ch24)}">${h.asset ? spct(h.asset.ch24) : '—'}</div><span class="mono mu">${esc(c.asset || '—')} in 24h · ${h.asset ? usd(h.asset.usd) : '—'}</span>
+          <div style="margin:16px 0 4px"><span class="st ${statusCls(h)}">${esc(h.status)}</span></div>
+          <ul class="rules" style="margin-top:10px"><li>pull<b>${c.pull || '—'}x</b></li><li>today's hook spends<b>${h.spendPct.toFixed(2)}% · ${num(h.spendSol, 4)} SOL</b></li><li>reserve<b>${num(c.reserve.sol, 4)} SOL</b></li><li>last hook<b>${c.lastHook ? ago(c.lastHook) : 'none yet'}</b></li></ul></div></div>
+      <div class="kv4"><div class="card"><small>market cap</small><b>${big(c.mcapUsd)}</b><em>Raydium</em></div><div class="card"><small>curve</small><b>${c.graduated ? 'graduated' : Math.round(c.progress) + '%'}</b><em>of ${num(c.curve.raise, 0)} SOL</em></div><div class="card"><small>fees to reserve</small><b>${num(c.reserve.earnedSol, 4)} SOL</b><em>1% of ${num(c.volumeSol, 2)} SOL volume</em></div><div class="card"><small>burned</small><b>${kfmt(c.burned)}</b><em>${c.hooks} hook${c.hooks === 1 ? '' : 's'}</em></div></div>
+      <div class="two"><div class="card feed"><div class="ch"><h3>Live trades</h3><span>every 10s</span></div><div id="cFeed"><div class="empty">reading…</div></div></div><div class="card"><div class="ch"><h3>Burn log</h3><span>${d.entries.length}</span></div><div class="rows">${d.entries.length ? d.entries.map(burnRow).join('') : '<div class="empty">No burns for this coin yet. The first green day for its asset shows up here.</div>'}</div></div></div>` : ''}
+      <div style="margin-top:16px">${tradeHtml('coin', mint)}</div></div>`; tradeInit($('[data-trade="coin"]'));
+    if (c) { loadTrades(c.pool); clearInterval(tradeTimer); tradeTimer = setInterval(() => { if (location.hash === '#/c/' + mint) loadTrades(c.pool); else clearInterval(tradeTimer); }, 10000); }
+    try { const hh = await api('holders', '&mint=' + mint); setT('#hCount', `${hh.count}${hh.full ? '' : '+'} holders`); } catch (e) { } }
+
+  // ---------------------------------------------------------------- trade widget (Jupiter)
+  function tradeHtml(id, mint) { return `<div class="card trade" data-trade="${id}" data-mint="${esc(mint || '')}" data-live="bal">
+    <div class="tl"><div class="lbl">token</div><input class="in tq" placeholder="paste a token address, or pick one" autocomplete="off" value="${esc(mint || '')}" aria-label="token address"><div class="picks"></div><div class="tinfo"></div><div class="tstat"></div></div>
+    <div class="trr"><div class="side"><button class="buy on" data-side="buy">Buy</button><button class="sell" data-side="sell">Sell</button></div>
+      <div class="box"><small><span>You pay</span><a class="max">balance —</a></small><div class="r"><input class="amt" inputmode="decimal" placeholder="0.0" aria-label="amount"><span class="tsel tin">SOL</span></div><div class="pct"><button data-p=".25">25%</button><button data-p=".5">50%</button><button data-p="1">MAX</button></div></div>
+      <div class="box"><small><span>You get</span><span class="outusd"></span></small><div class="r"><input class="out" readonly placeholder="0.0" aria-label="you get"><span class="tsel tout">—</span></div></div>
+      <div class="qinfo"><div>price impact<b class="qi">—</b></div><div>route<b class="qr">—</b></div><div>slippage<b>1%</b></div></div>
+      <button class="btn gold wide tgo">Connect wallet</button><div class="stat2 tst"></div></div></div>`; }
+  const TI = {}; async function tokInfo(m) { if (TI[m]) return TI[m]; if (m === SOL) return TI[m] = { id: SOL, symbol: 'SOL', name: 'Solana', decimals: 9, icon: '' };
+    const j = await fetch(`${JUP}/tokens/v2/search?query=${m}`).then(r => r.json()).catch(() => []); const t = (Array.isArray(j) ? j : []).find(x => x.id === m); if (!t) throw new Error('Jupiter does not know this token yet'); return TI[m] = t; }
+  function tradeInit(el) { if (!el || el._on) return; el._on = 1; const T = { side: 'buy', mint: el.dataset.mint || '', q: null, t: null, seq: 0 };
+    const picks = $('.picks', el), q = $('.tq', el), amtEl = $('.amt', el), st = (m, c = '') => { const s = $('.tst', el); s.className = 'stat2 tst ' + c; s.innerHTML = m; };
+    const list = () => coinList().slice(0, 8).map(c => ({ mint: c.mint, sym: c.symbol, img: c.image }));
+    const drawPicks = () => { picks.innerHTML = list().map(p => `<button data-m="${p.mint}"><img src="${esc(p.img || '/coins/1.png')}" alt="">${esc(p.sym)}</button>`).join(''); labels(); }; el._picks = drawPicks; drawPicks();
+    picks.onclick = e => { const b = e.target.closest('button'); if (!b) return; q.value = b.dataset.m; pick(b.dataset.m); };
+    q.addEventListener('input', () => { const v = q.value.trim(); if (/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(v)) pick(v); });
+    $('.side', el).onclick = e => { const b = e.target.closest('button'); if (!b) return; T.side = b.dataset.side; $$('.side button', el).forEach(x => x.classList.toggle('on', x === b)); labels(); amtEl.value = ''; quote(); };
+    $('.pct', el).onclick = e => { const b = e.target.closest('button'); if (!b) return; const bal = balOf(); if (bal == null) return; const f = +b.dataset.p; amtEl.value = String(+(T.side === 'buy' ? Math.max(0, bal * f - (f === 1 ? .01 : 0)) : bal * f).toFixed(T.side === 'buy' ? 4 : 6)); quote(); };
+    $('.max', el).onclick = () => $('.pct button[data-p="1"]', el).click();
+    let deb; amtEl.addEventListener('input', () => { clearTimeout(deb); deb = setTimeout(quote, 350); }); el.addEventListener('bal', labels); $('.tgo', el).onclick = go;
+    function balOf() { if (!WL.view) return null; if (T.side === 'buy') return WL.view.sol; const t = WL.view.tokens.find(x => x.mint === T.mint); return t ? t.amount : 0; }
+    function labels() { const bal = balOf(); $('.max', el).textContent = 'balance ' + (bal == null ? '—' : num(bal)); const sym = T.t ? T.t.symbol : '—', ic = T.t && T.t.icon ? `<img src="${esc(T.t.icon)}" alt="">` : '';
+      $('.tin', el).innerHTML = T.side === 'buy' ? 'SOL' : ic + esc(sym); $('.tout', el).innerHTML = T.side === 'buy' ? ic + esc(sym) : 'SOL';
+      $('.tgo', el).textContent = !WL.pk ? 'Connect wallet' : !T.t ? 'Pick a token' : (T.side === 'buy' ? 'Buy ' : 'Sell ') + sym; $$('.picks button', el).forEach(b => b.classList.toggle('on', b.dataset.m === T.mint)); }
+    async function pick(m) { T.mint = m; T.t = null; labels(); $('.tinfo', el).innerHTML = '<small class="mu">reading the token…</small>'; try { const t = await tokInfo(m); if (T.mint !== m) return; T.t = t;
+        const mc = t.mcap ?? t.fdv, ch = t.stats24h && t.stats24h.priceChange; $('.tinfo', el).innerHTML = `<img src="${esc(t.icon || '/coins/1.png')}" alt="" onerror="this.src='/coins/1.png'"><span><b>${esc(t.name || t.symbol)} <span class="mu mono">$${esc(t.symbol)}</span></b><small>${esc(m)}</small></span>`;
+        $('.tstat', el).innerHTML = `<div><small>price</small><b>${usd(t.usdPrice)}</b></div><div><small>24h</small><b class="${cls(ch)}">${spct(ch)}</b></div><div><small>market cap</small><b>${big(mc)}</b></div>`; labels(); quote(); }
+      catch (e) { $('.tinfo', el).innerHTML = `<small class="dn">${esc(e.message)}</small>`; $('.tstat', el).innerHTML = ''; } }
+    async function quote() { const a = +amtEl.value; $('.out', el).value = ''; $('.qi', el).textContent = '—'; $('.qr', el).textContent = '—'; $('.outusd', el).textContent = ''; T.q = null; if (!T.t || !(a > 0)) return;
+      const inM = T.side === 'buy' ? SOL : T.mint, outM = T.side === 'buy' ? T.mint : SOL, inD = T.side === 'buy' ? 9 : T.t.decimals, outD = T.side === 'buy' ? T.t.decimals : 9, my = ++T.seq;
+      try { const r = await fetch(`${JUP}/swap/v1/quote?inputMint=${inM}&outputMint=${outM}&amount=${Math.floor(a * 10 ** inD)}&slippageBps=100`).then(x => x.json()); if (my !== T.seq) return; if (!r.outAmount) throw new Error(r.error || 'no route right now');
+        T.q = r; const o = r.outAmount / 10 ** outD; $('.out', el).value = num(o, 6); $('.qi', el).textContent = (+r.priceImpactPct * 100).toFixed(2) + '%'; $('.qr', el).textContent = (r.routePlan || []).map(x => x.swapInfo.label).join(' → ');
+        const px = T.side === 'buy' ? T.t.usdPrice : (WL.view && WL.view.solUsd); if (px) $('.outusd', el).textContent = '≈ ' + usd(o * px, 2); st(''); } catch (e) { if (my === T.seq) st(esc(e.message), 'err'); } }
+    async function go() { try { if (!WL.pk) { await connect(); return; } if (!T.q) throw new Error('enter an amount first'); st('building the swap…');
+        const s = await fetch(`${JUP}/swap/v1/swap`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ quoteResponse: T.q, userPublicKey: WL.pk, wrapAndUnwrapSol: true, dynamicComputeUnitLimit: true, prioritizationFeeLamports: { priorityLevelWithMaxLamports: { maxLamports: 400000, priorityLevel: 'high' } } }) }).then(r => r.json());
+        if (!s.swapTransaction) throw new Error('Jupiter returned no swap'); const r = await signSend([s.swapTransaction], st, true); st(`done. ${tsx(r.sigs[0])}`, 'ok'); toast(`Swap confirmed · ${tsx(r.sigs[0])}`); amtEl.value = ''; quote(); }
+      catch (e) { if (e.message !== 'no wallet') st(esc(e.message || String(e)), 'err'); } }
+    labels(); if (T.mint) pick(T.mint); }
+  const tradePage = () => `<div class="wrap"><div class="phd"><div><span class="kick">trade</span><h1>Trade any hooked coin.</h1><p>Or any token on Solana, with SOL, through Jupiter. Live quote first, then you sign in your own wallet.</p></div></div>${tradeHtml('page', '')}</div>`;
+
+  // ---------------------------------------------------------------- burns + proof of reserves
+  const burnsPage = () => `<div class="wrap"><div class="phd"><div><span class="kick">burns</span><h1>Every hook, on-chain.</h1><p>Each one is a single Solana transaction from the reserve wallet: a buy through Jupiter, a burn and a memo naming the coin, the asset and its move.</p></div></div>
+    <div class="card proof" id="proof"><div><small>reserve wallet</small><b>—</b></div><div><small>waiting in LaunchLab</small><b>—</b></div><div><small>owed to coins</small><b>—</b></div><div><small>covered</small><b>—</b></div></div>
+    <div class="card rows" style="margin-top:16px" id="eList"><div class="empty">reading the burn log…</div></div></div>`;
+  function renderBurns() { const el = $('#eList'); if (el && S.ledger) el.innerHTML = (S.ledger.entries || []).length ? S.ledger.entries.map(burnRow).join('') : '<div class="empty">No burns yet. The first green day after a launch shows up here.</div>';
+    const p = $('#proof'); if (p && S.res) { const r = S.res; p.innerHTML = r.wallet ? `<div><small>reserve wallet</small><b>${num(r.walletSol, 4)} SOL</b><a class="mono mu" style="font-size:12px" href="https://solscan.io/account/${r.wallet}" target="_blank" rel="noopener">${short(r.wallet)} ↗</a></div><div><small>waiting in LaunchLab</small><b>${num(r.vaultSol, 4)} SOL</b></div><div><small>owed to coins</small><b>${num(r.owedSol, 4)} SOL</b></div><div><small>covered</small><b class="${r.covered ? 'up' : 'dn'}">${r.covered ? 'yes' : 'no'}</b></div>`
+      : `<div><small>reserve wallet</small><b>—</b></div><div><small>waiting in LaunchLab</small><b>—</b></div><div><small>owed to coins</small><b>—</b></div><div><small>covered</small><b class="mu">opens with the launchpad</b></div>`; } }
+
+  // ---------------------------------------------------------------- docs
+  function docsPage() { const pad = S.m && S.m.pad, rw = S.coins && S.coins.reserveWallet; const sec = (id, t, h) => `<section id="d-${id}"><h3>${t}</h3>${h}</section>`;
+    return `<div class="wrap"><div class="phd"><div><span class="kick">docs</span><h1>How hook works.</h1><p>Everything a coin does, where every number comes from, and what it isn't.</p></div></div>
+    <div class="docs"><nav class="toc" id="toc">${[['overview', 'Overview'], ['launch', 'Launching'], ['pull', 'The pull'], ['reserve', 'Reserves and fees'], ['burn', 'The burn'], ['grad', 'Graduation'], ['data', 'Data sources'], ['risk', 'What it isn’t'], ['addr', 'Addresses']].map(([k, l]) => `<a href="#/docs" data-d="${k}">${l}</a>`).join('')}</nav>
+    <div class="doc">
+      ${sec('overview', 'Overview', `<p>hook is a launchpad on Raydium LaunchLab. Every coin launched on it is hooked to one real-world asset: a stock, an index, gold or crypto. 1% of every trade fills the coin's own reserve. On a day its asset is green, the reserve buys the coin and burns it.</p><p>You don't buy or hold the asset. The asset only decides when, and how hard, your coin's reserve buys and burns.</p>`)}
+      ${sec('launch', 'Launching', `<ul><li>Connect Phantom, Solflare or Backpack.</li><li>Pick the asset and the pull, name the coin, pick or upload an image, add a dev buy if you want one.</li><li>Sign once. That transaction creates the coin on Raydium LaunchLab with a fixed supply of 1,000,000,000 and LaunchLab's standard curve.</li><li>The asset and the pull are written into the coin's metadata link, e.g. <code>…/api/hook?a=t&amp;x=NVDA&amp;p=5</code>. They can't change.</li><li>It costs network fees and rent, about 0.03 SOL, plus any dev buy. No launch fee.</li></ul>`)}
+      ${sec('pull', 'The pull', `<p>The pull is how hard a green day pulls, from 1x to 10x.</p><div class="formula">spend = min(${CAPP()}%, 24h move × pull) of the reserve</div><ul><li>NVDA +2% with a 5x pull → 10% of the reserve.</li><li>BTC +6% with a 10x pull → ${CAPP()}% (the cap).</li><li>A move under +${MINM()}%, or a red day → nothing. The reserve keeps filling.</li><li>One hook per coin per UTC day.</li></ul>`)}
+      ${sec('reserve', 'Reserves and fees', `<ul><li>1% of every buy and sell on the curve → that coin's reserve.</li><li>0.25% → Raydium LaunchLab's own protocol fee.</li><li>0% → the creator. 0% → hook.</li></ul><p>A coin's reserve is 1% of everything it has traded on the curve, minus every hook it has already run. The fees sit in LaunchLab's platform vault until they're claimed to the reserve wallet; the proof of reserves shows both.</p>`)}
+      ${sec('burn', 'The burn', `<p>The reserve wallet runs each hook from the console. One transaction does three things: it buys the coin with SOL through Jupiter, burns everything it bought, and writes a memo:</p><div class="formula">hook:burn:&lt;coin&gt;:&lt;lamports&gt;:&lt;asset&gt;:&lt;move&gt;</div><p>The site refuses to build a hook for a coin that isn't armed: its asset must be green, it must not have been hooked today, and its reserve must hold enough to buy with.</p>`)}
+      ${sec('grad', 'Graduation', `<p>When the curve fills (${num((S.m && S.m.raiseSol) || 85, 0)} SOL raised), LaunchLab moves the raise and the rest of the supply into a Raydium pool. Half the LP is burned for good; the other half is kept by the reserve wallet as a Raydium fee key.</p>`)}
+      ${sec('data', 'Data sources', `<ul><li>Asset prices and 24h moves: Jupiter, from each asset's token on Solana (xStocks for stocks, indexes and gold · cbBTC · wrapped ETH · SOL). Dexscreener fills gaps.</li><li>Coins, curves, volume, candles and trades: Raydium LaunchLab's own APIs.</li><li>Burns and profiles: read straight from Solana.</li></ul>`)}
+      ${sec('risk', 'What it isn’t', `<ul><li>Not a stock, a fund or a derivative. A hooked coin is a memecoin.</li><li>Not affiliated with any company, index, issuer, Raydium or Jupiter.</li><li>Hooks are run by the reserve wallet from the console. They're not automatic, and every one is public.</li><li>A reserve buys and burns. It doesn't stop a coin from going to zero.</li><li>Not financial advice.</li></ul>`)}
+      ${sec('addr', 'Addresses', `<div class="addr"><div><span>LaunchLab program</span><b>LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj</b></div><div><span>hook launchpad</span><b>${pad ? esc(pad) : 'opening soon'}</b></div><div><span>reserve wallet</span><b>${rw ? esc(rw) : 'opening soon'}</b></div><div><span>burn log tag</span><b>4BnF8G7NhfW1ha5cg8YBpcfSAxinoJWeGwExETvvU8iT</b></div><div><span>launch tag</span><b>BE1s33gicDg2q9hWK1ABTayk83tDLy4Aw4wS8zNjH25S</b></div></div>`)}
+    </div></div></div>`; }
+  function docsInit() { const t = $('#toc'); if (!t) return; t.onclick = e => { const a = e.target.closest('a'); if (!a) return; e.preventDefault(); const s = $('#d-' + a.dataset.d); if (s) scrollTo({ top: s.getBoundingClientRect().top + scrollY - 70, behavior: RM ? 'auto' : 'smooth' }); };
+    const io = new IntersectionObserver(es => es.forEach(x => { if (x.isIntersecting) $$('#toc a').forEach(a => a.classList.toggle('on', 'd-' + a.dataset.d === x.target.id)); }), { rootMargin: '-30% 0px -60% 0px' }); $$('.doc section').forEach(s => io.observe(s)); }
+
+  // ---------------------------------------------------------------- profile
+  async function profilePage(w) { app().innerHTML = `<div class="wrap"><div class="card empty" style="margin-top:40px">reading the profile…</div></div>`; let p = null; try { p = (await api('profile', '&wallet=' + w)).profile; } catch (e) { app().innerHTML = `<div class="wrap"><div class="card empty" style="margin-top:40px">${esc(e.message)}</div></div>`; return; }
+    const mine = WL.pk === w; app().innerHTML = `<div class="wrap">
+      <div class="card chead"><span class="big av" style="border:0;font-size:30px">${avatarHtml(p, w)}</span><div><h1>${esc(p ? p.name : short(w))}</h1><p>${p && p.bio ? esc(p.bio) : mine ? 'No profile yet. Make one: it takes one signature.' : 'This wallet has no profile yet.'}</p>
+        <div class="meta"><span class="mono">${esc(short(w))}</span>${p && p.x ? `<a href="https://x.com/${esc(p.x)}" target="_blank" rel="noopener">@${esc(p.x)} ↗</a>` : ''}<a href="https://solscan.io/account/${w}" target="_blank" rel="noopener">solscan ↗</a>${p ? `<span>updated ${ago(p.time)}</span>` : ''}</div></div>
+        ${mine ? `<div class="act"><button class="btn gold" id="edit">${p ? 'Edit profile' : 'Make my profile'}</button></div>` : ''}</div>
+      <div class="pgrid"><div class="card pbox"><h3>Wallet · live</h3><div class="bigbal"><b id="pTot">—</b><small id="pSol">—</small></div><div class="toks" id="pToks" style="max-height:none"></div></div>
+        <div class="card pbox"><h3>Hooked coins held</h3><div class="toks" id="pCoins" style="max-height:none"><div class="empty">reading…</div></div><h3 style="margin-top:20px">Coins launched</h3><div class="rows" id="pMade"></div></div></div></div>`;
+    if (mine) $('#edit').onclick = () => editProfile(p);
+    const made = coinList().filter(c => c.creator === w); $('#pMade').innerHTML = made.length ? made.map(coinRow).join('') : '<div class="empty">None yet.</div>';
+    const fill = v => { setT('#pTot', usd(v.totalUsd, 2)); setT('#pSol', `${num(v.sol)} SOL · ${usd(v.solValue, 2)}`); $('#pToks').innerHTML = v.tokens.slice(0, 20).map(tokRow).join('') || '<div class="empty">no tokens</div>';
+      const held = v.tokens.filter(t => coinBy(t.mint)); $('#pCoins').innerHTML = held.map(t => { const c = coinBy(t.mint); return `<a class="tok" href="#/c/${t.mint}">${c.image ? `<img src="${esc(c.image)}" alt="">` : '<span class="ph"></span>'}<span><b>$${esc(c.symbol)}</b><small>${esc(c.asset || '')} · ${c.pull || '—'}x</small></span><span class="v">${kfmt(t.amount)}<small>${usd(t.usd, 2)}</small></span></a>`; }).join('') || '<div class="empty">No hooked coins in this wallet yet.</div>'; };
+    const load = async () => { try { const v = mine && WL.view ? WL.view : await api('wallet', '&addr=' + w); if (location.hash === '#/u/' + w) fill(v); } catch (e) { } }; load(); clearInterval(profilePage.t); profilePage.t = setInterval(() => { if (location.hash === '#/u/' + w) load(); else clearInterval(profilePage.t); }, 10000); }
+  function editProfile(p) { const m = $('#modal'); $('#mCard').innerHTML = `<h3>Your profile, on Solana</h3><label class="fld"><span>Name</span><input id="eName" maxlength="24" value="${esc(p ? p.name : '')}" placeholder="hooker"></label><label class="fld"><span>Bio</span><textarea id="eBio" maxlength="140" rows="3" placeholder="what you launch, what you hold">${esc(p ? p.bio : '')}</textarea></label><label class="fld"><span>Avatar (https image link)</span><input id="eAv" value="${esc(p ? p.avatar : '')}" placeholder="https://…"></label><label class="fld"><span>X handle</span><input id="eX" maxlength="16" value="${esc(p ? p.x : '')}" placeholder="@handle"></label><button class="btn gold wide" id="eSave">Save on-chain</button><div class="stat2" id="eStat"></div>`;
+    m.classList.add('on'); m.onclick = e => { if (e.target === m) m.classList.remove('on'); };
+    $('#eSave').onclick = async () => { const st = stat('#eStat'); try { await connect(); st('building the memo…'); const r = await post('buildProfile', { wallet: WL.pk, name: $('#eName').value, bio: $('#eBio').value, avatar: $('#eAv').value.trim(), x: $('#eX').value });
+        const s = await signSend(r.txs, st, false); st(`saved on-chain. ${tsx(s.sigs[0])}`, 'ok'); toast('Profile saved on Solana.'); setTimeout(async () => { m.classList.remove('on'); await loadMe(); cur = null; render(); }, 2200); } catch (e) { if (e.message !== 'no wallet') st(esc(e.message), 'err'); } }; }
+
+  // ---------------------------------------------------------------- console: for the reserve wallet
+  function consolePage() { app().innerHTML = `<div class="wrap"><div class="phd"><div><span class="kick">console</span><h1>Run the hooks.</h1><p>For the wallet that runs hook. Every step is a transaction you sign, and every hook lands on the public burn log.</p></div></div>
+    <div class="card cstep"><h3><span>01</span>Create the hook launchpad</h3><p>One transaction on Raydium LaunchLab: 1% fee to this wallet (the reserve wallet), 0% creator fee, half the LP burned at graduation and half kept as a fee key.</p><div class="crow"><button class="btn gold sm" id="kPad">Create the launchpad</button><span class="mono mu" id="kPadInfo"></span></div><div class="stat2" id="kPadSt"></div></div>
+    <div class="card cstep"><h3><span>02</span>Claim the fees</h3><p>Moves what every coin has paid from LaunchLab's vault to this wallet, as SOL. Reserves are already counted per coin; claiming just moves the SOL.</p><div class="crow"><button class="btn sm" id="kClaim">Claim</button><span class="mono mu" id="kVault"></span></div><div class="stat2" id="kClaimSt"></div></div>
+    <div class="card cstep"><h3><span>03</span>Run today's hooks</h3><p>Every coin, its asset's 24h move and what its hook would spend. A coin is armed when its asset is green, it hasn't been hooked today and its reserve can buy. Each hook buys the coin through Jupiter and burns what it bought, in one transaction.</p>
+      <div class="crow" style="margin-bottom:10px"><button class="btn sm" id="kScan">Refresh</button><button class="btn gold sm" id="kAll">Run every armed hook</button><span class="mono mu" id="kScanSt"></span></div><div id="kTable"><div class="empty">reading the launchpad…</div></div><div class="stat2" id="kSt"></div></div></div>`;
+    const ref = async () => { if (!WL.pk) { setT('#kPadInfo', 'connect the wallet that runs hook'); return; } try { const p = await api('pad', '&admin=' + WL.pk); setT('#kPadInfo', p.exists ? `launchpad ${short(p.id)} · ${p.feePct}% fee` : 'no launchpad on this wallet yet'); setT('#kVault', p.exists ? `${(+p.unclaimedSol).toFixed(4)} SOL waiting` : ''); } catch (e) { setT('#kPadInfo', e.message); } }; ref();
+    const table = () => { const el = $('#kTable'), C = coinList(); if (!el) return; if (!S.coins || !S.coins.open) { el.innerHTML = '<div class="empty">Opens once the launchpad address is set on the site.</div>'; return; } if (!C.length) { el.innerHTML = '<div class="empty">No coins on the launchpad yet.</div>'; return; }
+      el.innerHTML = `<div class="ctr h"><span>coin</span><span>asset · pull</span><span>24h</span><span>reserve</span><span>status</span><span></span></div>` + C.map(c => `<div class="ctr" data-m="${c.mint}"><span>$${esc(c.symbol)}</span><span>${esc(c.asset || '—')} · ${c.pull || '—'}x</span><span class="${cls(c.hook.asset && c.hook.asset.ch24)}">${c.hook.asset ? spct(c.hook.asset.ch24) : '—'}</span><span>${num(c.reserve.sol, 4)}</span><span class="st ${statusCls(c.hook)}">${statusTxt(c.hook)}</span><span><button class="btn sm gold kB" ${c.hook.armed ? '' : 'disabled'}>Hook ${num(c.hook.spendSol, 4)}</button></span></div>`).join(''); };
+    table(); consolePage.table = table;
+    const run = async mint => { const st = stat('#kSt'); await connect(); st('building the hook…'); const r = await post('buildHook', { wallet: WL.pk, coin: mint }); const s = await signSend(r.txs, st, true); st(`hooked: ${num(r.sol, 4)} SOL (${r.spendPct.toFixed(2)}%) on ${esc(r.asset)} ${spct(r.move)}, bought and burned. ${tsx(s.sigs[0])}`, 'ok'); };
+    $('#kScan').onclick = async () => { setT('#kScanSt', 'reading…'); await loadMarket(); await Promise.all([loadCoins(), loadLedger()]); table(); setT('#kScanSt', 'updated ' + new Date().toLocaleTimeString()); };
+    $('#kTable').onclick = async e => { const b = e.target.closest('.kB'); if (!b) return; try { await run(b.closest('.ctr').dataset.m); setTimeout(async () => { await Promise.all([loadCoins(), loadLedger()]); table(); }, 3000); } catch (err) { if (err.message !== 'no wallet') stat('#kSt')(esc(err.message), 'err'); } };
+    $('#kAll').onclick = async () => { const A = coinList().filter(c => c.hook.armed); if (!A.length) { stat('#kSt')('No coin is armed right now.'); return; } for (const c of A) { try { await run(c.mint); } catch (err) { stat('#kSt')(`$${esc(c.symbol)}: ${esc(err.message)}`, 'err'); break; } } setTimeout(async () => { await Promise.all([loadCoins(), loadLedger()]); table(); }, 3000); };
+    $('#kPad').onclick = async () => { const st = stat('#kPadSt'); try { await connect(); st('building…'); const r = await post('buildPad', { wallet: WL.pk, feePct: 1, burnPct: 50, web: location.origin, img: location.origin + '/icon.png' }); const s = await signSend(r.txs, st, false); st(`the hook launchpad is live: <b>${esc(r.pad)}</b> ${tsx(s.sigs[0])}\nsend this address over so the site can open the launcher.`, 'ok'); ref(); } catch (e) { if (e.message !== 'no wallet') st(esc(e.message), 'err'); } };
+    $('#kClaim').onclick = async () => { const st = stat('#kClaimSt'); try { await connect(); st('building the claim…'); const r = await post('claim', { wallet: WL.pk }); const s = await signSend(r.txs, st, false); st(`claimed. ${tsx(s.sigs[0])}`, 'ok'); ref(); } catch (e) { if (e.message !== 'no wallet') st(esc(e.message), 'err'); } }; }
+
+  // ---------------------------------------------------------------- router + glue
+  function reveals() { if (RM) { $$('.rv').forEach(e => e.classList.add('shown')); return; } const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('shown'); io.unobserve(e.target); } }), { rootMargin: '0px 0px -6% 0px' }); $$('.rv:not(.shown)').forEach(e => io.observe(e)); }
+  let cur = null, view = 'home';
+  const PAGES = { home, launch: launchPage, assets: assetsPage, a: assetPage, coins: coinsPage, burns: burnsPage, trade: tradePage, docs: docsPage };
+  function render() { const h = location.hash || '#/', parts = h.slice(2).split('/'), v0 = parts[0] || 'home', arg = parts[1] ? decodeURIComponent(parts[1]) : ''; const v = PAGES[v0] || ['c', 'u', 'console'].includes(v0) ? v0 : 'home'; view = v;
+    document.body.classList.toggle('home', v === 'home'); onScroll();
+    const nav = { a: 'assets', c: 'coins' }[v] || v; $$('#dock a').forEach(a => a.classList.toggle('on', a.dataset.v === nav));
+    const key = v + ':' + arg; if (key === cur) return; cur = key;
+    scrollTo({ top: 0 }); app().classList.remove('pgin'); void app().offsetWidth; app().classList.add('pgin');
+    if (v === 'u') return profilePage(arg); if (v === 'c') return coinPage(arg); if (v === 'console') return consolePage();
+    app().innerHTML = PAGES[v](arg.toUpperCase()); reveals(); pageInit(v); }
+  function pageInit(v) { if (v === 'home') { renderWall(); renderPill(); calcInit(); renderMovers(); renderStats(); renderLive(); $$('[data-go]').forEach(b => b.onclick = () => { const s = $('#' + b.dataset.go); if (s) scrollTo({ top: s.getBoundingClientRect().top + scrollY - 60, behavior: RM ? 'auto' : 'smooth' }); }); }
+    if (v === 'launch') launchInit(); if (v === 'assets') { renderAssets(); $('#asSeg').onclick = e => { const b = e.target.closest('button'); if (!b) return; AS.kind = b.dataset.k; $$('#asSeg button').forEach(x => x.classList.toggle('on', x === b)); renderAssets(); }; }
+    if (v === 'coins') coinsInit(); if (v === 'trade') tradeInit($('[data-trade="page"]')); if (v === 'burns') renderBurns(); if (v === 'docs') docsInit(); }
+  function onScroll() { document.body.classList.toggle('top', view === 'home' && scrollY < innerHeight * .45); }
+  // live refresh: re-render only the parts that read live data, never the inputs someone is typing in
+  function refresh() { renderTape(); if (view === 'home') { renderWall(); renderPill(); renderCalc(); renderMovers(); renderStats(); renderLive(); }
+    if (view === 'launch') { renderPick(); renderLaunch(); } if (view === 'assets') renderAssets(); if (view === 'coins') renderBoard(); if (view === 'burns') renderBurns(); if (view === 'console' && consolePage.table) consolePage.table();
+    $$('[data-trade]').forEach(el => el._picks && el._picks()); }
+  addEventListener('hashchange', render); addEventListener('scroll', onScroll, { passive: true });
+  walletInit(); render();
+  (async () => { await loadMarket(); if (view === 'a' || view === 'docs') { cur = null; render(); } refresh(); await Promise.all([loadCoins(), loadLedger()]); if (view === 'a' || view === 'docs') { cur = null; render(); } refresh(); })();
+  setInterval(async () => { await loadMarket(); refresh(); }, 30000);
+  setInterval(async () => { await Promise.all([loadCoins(), loadLedger()]); refresh(); }, 20000);
+})();
