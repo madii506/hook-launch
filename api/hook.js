@@ -65,10 +65,12 @@ function curveFromRow(sellRaw, raiseLamports) { const sold = Number(sellRaw) / 1
 async function jupInfo(mints) { const o = {}; for (let i = 0; i < mints.length; i += 90) { const part = mints.slice(i, i + 90); try { const j = await getJ(`${JUP}/tokens/v2/search?query=${part.join(',')}`); for (const t of j || []) o[t.id] = { symbol: t.symbol, name: t.name, icon: t.icon, decimals: t.decimals, usd: t.usdPrice ?? null, ch24: t.stats24h ? t.stats24h.priceChange ?? null : null, mcap: t.mcap ?? t.fdv ?? null, liquidity: t.liquidity ?? null }; } catch { } } return o; }
 async function dexInfo(mints) { const o = {}; for (let i = 0; i < mints.length; i += 30) { try { const j = await getJ(`https://api.dexscreener.com/tokens/v1/solana/${mints.slice(i, i + 30).join(',')}`);
     for (const m of mints.slice(i, i + 30)) { const p = (Array.isArray(j) ? j : []).filter(x => x.baseToken && x.baseToken.address === m).sort((a, b) => ((b.liquidity || {}).usd || 0) - ((a.liquidity || {}).usd || 0))[0]; if (p) o[m] = { usd: +p.priceUsd, ch24: p.priceChange ? p.priceChange.h24 ?? null : null }; } } catch { } } return o; }
+// some token icons point at public IPFS gateways that often time out; serve those through a gateway that answers
+const ipfsFix = u => { if (!u) return null; const m = String(u).match(/\/ipfs\/([A-Za-z0-9]{40,70})(.*)$/); return m ? 'https://gateway.pinata.cloud/ipfs/' + m[1] + m[2] : u; };
 let assetCache = null;
 async function assets() { if (assetCache && Date.now() - assetCache.t < 30000) return assetCache.v;
   const mints = ASSETS.map(a => a.mint), J = await jupInfo(mints), miss = mints.filter(m => !J[m] || J[m].usd == null || J[m].ch24 == null), D = miss.length ? await dexInfo(miss) : {};
-  const list = ASSETS.map(a => { const j = J[a.mint] || {}, d = D[a.mint] || {}, usd = j.usd ?? d.usd ?? null, ch24 = j.ch24 ?? d.ch24 ?? null; return { ...a, usd, ch24, src: j.usd != null ? 'jupiter' : d.usd != null ? 'dexscreener' : null, icon: j.icon || null }; });
+  const list = ASSETS.map(a => { const j = J[a.mint] || {}, d = D[a.mint] || {}, usd = j.usd ?? d.usd ?? null, ch24 = j.ch24 ?? d.ch24 ?? null; return { ...a, usd, ch24, src: j.usd != null ? 'jupiter' : d.usd != null ? 'dexscreener' : null, icon: ipfsFix(j.icon) }; });
   const v = { at: Date.now(), assets: list, green: list.filter(a => a.ch24 != null && a.ch24 >= MINMOVE).length, read: list.filter(a => a.ch24 != null).length };
   assetCache = { t: Date.now(), v }; return v; }
 let mktCache = null;
