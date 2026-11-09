@@ -2,7 +2,7 @@
 // Every coin launches on the hook launchpad on Raydium LaunchLab, hooked to one asset (NVDA, TSLA, SPY, gold, BTC…) with a pull from 1x to 10x.
 // 1% of every curve trade fills the coin's reserve. On a day its asset is green, the reserve spends (the asset's 24h move × the pull)% of itself,
 // capped at 50%, buying the coin through Jupiter and burning what it bought, in one transaction with a memo. Once per coin per UTC day.
-// GET  a=market · a=assets · a=coins · a=coin&mint= · a=hookstate&mint= · a=ledger · a=reserves · a=t (token metadata) · a=wallet · a=profiles · a=profile · a=holders · a=pad · a=bal · a=simHook · a=simLaunch
+// GET  a=market · a=assets · a=history&sym= · a=coins · a=coin&mint= · a=hookstate&mint= · a=ledger · a=reserves · a=t (token metadata) · a=wallet · a=profiles · a=profile · a=holders · a=pad · a=bal · a=simHook · a=simLaunch
 // POST a=upload · a=buildPad · a=buildLaunch · a=buildProfile · a=claim · a=buildHook · a=send   (every transaction is signed in the visitor's own wallet)
 const { Connection, PublicKey, Keypair, SystemProgram, ComputeBudgetProgram, Transaction, TransactionInstruction, TransactionMessage, VersionedTransaction, AddressLookupTableAccount } = require('@solana/web3.js');
 const SPL = require('@solana/spl-token');
@@ -76,6 +76,15 @@ async function market() { if (mktCache && Date.now() - mktCache.t < 30000) retur
   const [A, { cfg }] = await Promise.all([assets(), chain().catch(() => ({ cfg: null }))]); const sol = A.assets.find(a => a.sym === 'SOL');
   const v = { at: Date.now(), pad: PIN.pad || null, sol: sol ? { usd: sol.usd, ch24: sol.ch24 } : null, pull: PULL, capPct: CAP, minMovePct: MINMOVE, assets: A.assets, green: A.green, read: A.read, raiseSol: Number(DEFAULT_RAISE) / 1e9, minRaiseSol: cfg ? +cfg.minFundRaisingB.toString() / 1e9 : 24, tradeFeePct: cfg ? pct(cfg.tradeFeeRate) : .25 };
   mktCache = { t: Date.now(), v }; return v; }
+// daily price history for an asset: its token's deepest pool on Dexscreener → GeckoTerminal daily candles, priced in USD
+const histCache = new Map();
+async function history(sym) { const a = ASSET[String(sym || '').toUpperCase()]; if (!a) throw new Error('not an asset on hook');
+  const c = histCache.get(a.sym); if (c && Date.now() - c.t < 1800000) return c.v;
+  const d = await getJ(`https://api.dexscreener.com/tokens/v1/solana/${a.mint}`); const p = (Array.isArray(d) ? d : []).filter(x => x.baseToken && (x.baseToken.address === a.mint || (x.quoteToken && x.quoteToken.address === a.mint))).sort((x, y) => ((y.liquidity || {}).usd || 0) - ((x.liquidity || {}).usd || 0))[0];
+  if (!p) throw new Error('no pool for ' + a.sym);
+  const g = await getJ(`https://api.geckoterminal.com/api/v2/networks/solana/pools/${p.pairAddress}/ohlcv/day?aggregate=1&limit=120&currency=usd&token=${a.mint}`, 10000);
+  const rows = ((g && g.data && g.data.attributes && g.data.attributes.ohlcv_list) || []).map(x => ({ t: x[0], o: +x[1], h: +x[2], l: +x[3], c: +x[4] })).filter(r => r.c > 0).sort((x, y) => x.t - y.t);
+  const v = { sym: a.sym, pool: p.pairAddress, dex: p.dexId, src: 'geckoterminal', rows }; histCache.set(a.sym, { t: Date.now(), v }); return v; }
 // the hook rule: on a green day the reserve spends (move × pull)%, capped
 const spendPct = (ch24, pull) => ch24 == null || ch24 < MINMOVE ? 0 : Math.min(CAP, ch24 * pull);
 
@@ -290,6 +299,7 @@ module.exports = async (req, res) => { if (req.method === 'GET') res.setHeader('
     if (a === 'market') return out(res, 200, await market(), 's-maxage=30, stale-while-revalidate=90');
     if (a === 'assets') return out(res, 200, await assets(), 's-maxage=30, stale-while-revalidate=90');
     if (a === 'coins') return out(res, 200, await coins(), 's-maxage=15, stale-while-revalidate=60');
+    if (a === 'history') return out(res, 200, await history(q.get('sym')), 's-maxage=1800, stale-while-revalidate=3600');
     if (a === 'coin') { const c = await coins(), m = String(q.get('mint') || ''), L = await ledger().catch(() => ({ entries: [] })), coin = c.coins.find(x => x.mint === m) || null; let k = { rows: [], src: null };
       if (coin) k = await candles(coin.pool, coin.graduated ? coin.mint : null).catch(() => k);
       return out(res, 200, { coin, open: c.open, entries: L.entries.filter(e => e.coin === m), candles: k.rows, src: k.src }, 's-maxage=15'); }
@@ -320,4 +330,4 @@ module.exports = async (req, res) => { if (req.method === 'GET') res.setHeader('
     return out(res, 404, { error: 'unknown action' });
   } catch (e) { return out(res, 400, { error: e.message || String(e) }); }
 };
-module.exports._t = { market, assets, coins, ledger, candles, curveFromRow, spendPct, hookOf, buildPad, buildLaunch, buildHook, claim, tokenMeta, conn, PIN, setChain: v => { chainCache = { t: Date.now() + 1e9, v }; }, setAssets: v => { assetCache = { t: Date.now() + 1e9, v }; } };
+module.exports._t = { market, assets, history, coins, ledger, candles, curveFromRow, spendPct, hookOf, buildPad, buildLaunch, buildHook, claim, tokenMeta, conn, PIN, setChain: v => { chainCache = { t: Date.now() + 1e9, v }; }, setAssets: v => { assetCache = { t: Date.now() + 1e9, v }; } };
