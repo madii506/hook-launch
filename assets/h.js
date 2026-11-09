@@ -25,10 +25,12 @@
   const KIND = { index: 'index', stock: 'stock', gold: 'gold', crypto: 'crypto' };
   const colOf = sym => { const A = assetList(), i = Math.max(0, A.findIndex(a => a.sym === sym)), h = HUES[i % HUES.length]; return `hsl(${h[0] + ((i * 7) % 11) - 5} ${h[1]}% ${h[2]}%)`; };
   const HOOK = (c1 = '#eef1f6', c2 = '#ffd24d') => `<svg viewBox="17 6 68 86" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><g transform="translate(12 4)"><circle cx="58" cy="15" r="7.5" stroke="${c1}" stroke-width="7"/><path d="M58 23 V64 a20 20 0 0 1 -40 0 V48" stroke="${c1}" stroke-width="8.5"/><path d="M10 56 L18 46 L26 56" stroke="${c2}" stroke-width="8.5"/></g></svg>`;
-  const ARROW = '<svg viewBox="0 0 11 8"><path d="M1 7 L5.5 2 L10 7" fill="none" stroke="#0b0f14" stroke-width="2.2" stroke-linecap="square"/></svg>';
+  const ARROW = '<svg class="ar" viewBox="0 0 11 8"><path d="M1 7 L5.5 2 L10 7" fill="none" stroke="#3ddc84" stroke-width="2.2" stroke-linecap="square"/></svg>';
   const FIRE = '<svg viewBox="0 0 24 24"><path d="M12 3c1 4 6 6 6 11a6 6 0 0 1-12 0c0-3 2-4 2-7 2 1 3 3 3 5 1-3 1-6 1-9z"/></svg>';
-  const badge = c => c.asset ? `<span class="hb" style="background:${colOf(c.asset)}">${esc(c.asset)} · ${c.pull || '—'}x</span>` : '';
-  const sq = (sym, s = 38) => `<span class="sq" style="background:${colOf(sym)};width:${s}px;height:${s}px">${esc(sym)}</span>`;
+  // real logos: each asset's own token icon (xStocks, cbBTC, wrapped ETH, SOL), read from Jupiter. Until it loads, the ticker shows.
+  const logo = (sym, s = 28, r) => { const a = assetBy(sym), src = a && a.icon ? esc(a.icon) : ''; return `<span class="lgw" style="width:${s}px;height:${s}px;border-radius:${r ?? Math.round(s * .3)}px"><em>${esc(String(sym).slice(0, 4))}</em><img class="lg" data-logo="${esc(sym)}" ${src ? `src="${src}"` : ''} alt="${esc(sym)}" loading="lazy" onerror="this.remove()"></span>`; };
+  function fillLogos() { $$('img[data-logo]:not([src])').forEach(el => { const a = assetBy(el.dataset.logo); if (a && a.icon) el.src = a.icon; }); $$('image[data-logo]').forEach(el => { const a = assetBy(el.dataset.logo); if (a && a.icon && !el.getAttribute('href')) el.setAttribute('href', a.icon); }); }
+  const badge = c => c.asset ? `<span class="hb">${logo(c.asset, 16, 5)}${esc(c.asset)} · ${c.pull || '—'}x</span>` : '';
 
   // ---------------------------------------------------------------- state
   const S = { m: null, coins: null, ledger: null, res: null, profiles: null, me: null };
@@ -76,29 +78,43 @@
   async function loadSocial() { try { S.profiles = (await api('profiles')).profiles; } catch (e) { S.profiles = S.profiles || []; } }
 
   // ---------------------------------------------------------------- the tape (top bar) and the asset wall (hero)
-  function renderTape() { const A = assetList(); if (!A.length) return; const one = A.map(a => `<a class="tk" href="#/a/${a.sym}"><i style="background:${colOf(a.sym)}"></i><b>${esc(a.sym)}</b>${usd(a.usd, a.usd >= 1000 ? 0 : 2)}<span class="${cls(a.ch24)}">${spct(a.ch24)}</span></a>`).join('');
+  function renderTape() { const A = assetList(); if (!A.length) return; const one = A.map(a => `<a class="tk" href="#/a/${a.sym}">${logo(a.sym, 18, 5)}<b>${esc(a.sym)}</b>${usd(a.usd, a.usd >= 1000 ? 0 : 2)}<span class="${cls(a.ch24)}">${spct(a.ch24)}</span></a>`).join('');
     const el = $('#tapeIn'); if (el._n === A.map(a => a.sym + a.usd + a.ch24).join()) return; el._n = A.map(a => a.sym + a.usd + a.ch24).join(); el.innerHTML = one + one; }
   function renderWall() { const el = $('#wall'); if (!el) return; const A = assetList(); if (!A.length) { if (!el.children.length) el.innerHTML = Array.from({ length: 24 }, (_, i) => `<div class="at shown" style="background:rgba(255,255,255,.04);border-color:rgba(255,255,255,.08);--o:${(.25 + .75 * ((i % 6) / 5)).toFixed(2)}"></div>`).join(''); return; }
     const fresh = !el.querySelector('[data-s]');
     const narrow = innerWidth <= 1000, cols = narrow ? 8 : 4, rows = narrow ? 3 : 6, order = [];
     // one hue per row, like the banner: asset k has hue k % 6, so row r holds assets r, r+6, r+12, r+18
     if (!narrow) { for (let r = 0; r < 6; r++) for (let c = 0; c < 4; c++) order.push(A[r + c * 6]); } else { for (let r = 0; r < 3; r++) for (let c = 0; c < 8; c++) order.push(A[(c % 4) * 6 + r * 2 + (c >= 4 ? 1 : 0)]); }
-    el.innerHTML = order.filter(Boolean).map((a, i) => { const col = i % cols, o = .28 + .72 * Math.pow(col / (cols - 1), 1.1), g = a.ch24 != null && a.ch24 >= MINM();
-      return `<a class="at ${g ? 'green' : ''} ${fresh ? '' : 'shown'}" data-s="${a.sym}" href="#/a/${a.sym}" style="background:${colOf(a.sym)};--o:${o.toFixed(2)};--dl:${(i % 7) * .4}s;transition-delay:${fresh ? (i * 35) + 'ms' : '0s'}" title="${esc(a.name)}"><b>${esc(a.sym)}</b>${g ? ARROW : ''}<span>${spct(a.ch24, 1)}</span></a>`; }).join('');
+    el.innerHTML = order.filter(Boolean).map((a, i) => { const col = i % cols, o = narrow ? 1 : .42 + .58 * Math.pow(col / (cols - 1), 1.1), g = a.ch24 != null && a.ch24 >= MINM();
+      return `<a class="at ${g ? 'green' : ''} ${fresh ? '' : 'shown'}" data-s="${a.sym}" href="#/a/${a.sym}" style="--o:${o.toFixed(2)};--dl:${(i % 7) * .4}s;transition-delay:${fresh ? (i * 35) + 'ms' : '0s'}" title="${esc(a.name)}">${logo(a.sym, narrow ? 22 : 34, narrow ? 6 : 10)}${g ? ARROW : ''}<div><b>${esc(a.sym)}</b><span class="${cls(a.ch24)}">${spct(a.ch24, 1)}</span></div></a>`; }).join('');
     if (fresh) requestAnimationFrame(() => requestAnimationFrame(() => $$('.at', el).forEach(t => t.classList.add('shown')))); }
   function renderPill() { const el = $('#greenPill'); if (!el || !S.m) return; el.innerHTML = S.m.read ? `<b>${S.m.green}</b> of ${S.m.read} assets green right now` : 'reading the markets…'; }
 
+  // ---------------------------------------------------------------- history: real daily closes, and what a hook would have done on each day
+  const HC = {};
+  const hist = sym => HC[sym] || (HC[sym] = api('history', '&sym=' + sym).catch(e => { delete HC[sym]; throw e; }));
+  function backtest(rows, pull, days = 30) { const today = Math.floor(Date.now() / 86400000) * 86400, R2 = rows.filter(r => r.t < today), out = [];
+    for (let i = Math.max(1, R2.length - days); i < R2.length; i++) { const mv = (R2[i].c / R2[i - 1].c - 1) * 100; out.push({ t: R2[i].t, move: mv, spend: spendPct(mv, pull) }); }
+    const hk = out.filter(d => d.spend > 0), left = out.reduce((k, d) => k * (1 - d.spend / 100), 1);
+    return { days: out, hooks: hk.length, avg: hk.length ? hk.reduce((a, d) => a + d.spend, 0) / hk.length : 0, max: Math.max(0, ...out.map(d => d.spend)), spent: (1 - left) * 100 }; }
+  const day = t => new Date(t * 1000).toISOString().slice(5, 10);
+  const stripHtml = bt => `<div class="strip">${bt.days.map(d => `<i class="${d.spend > 0 ? 'g' : d.move < 0 ? 'r' : ''}" style="--a:${d.spend > 0 ? (.35 + .65 * d.spend / CAPP()).toFixed(2) : 1}" title="${day(d.t)} · ${spct(d.move)} · ${d.spend > 0 ? 'hook ' + d.spend.toFixed(1) + '%' : 'no hook'}"></i>`).join('')}</div><div class="strip-x"><span>${bt.days.length ? day(bt.days[0].t) : ''}</span><span>${bt.days.length ? day(bt.days[bt.days.length - 1].t) : ''}</span></div>`;
+  function lineSvg(rows) { if (rows.length < 2) return '<div class="empty">No price history yet.</div>'; const W = 900, H = 260, P = 8, lo = Math.min(...rows.map(r => r.c)), hi = Math.max(...rows.map(r => r.c)), X = i => P + i * (W - 2 * P) / (rows.length - 1), Y = v => P + (hi - v) / (hi - lo || 1) * (H - 2 * P);
+    const d = rows.map((r, i) => (i ? 'L' : 'M') + X(i).toFixed(1) + ' ' + Y(r.c).toFixed(1)).join(' '), col = rows[rows.length - 1].c >= rows[0].c ? '#3ddc84' : '#ff6b6b';
+    return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><defs><linearGradient id="agr" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${col}" stop-opacity=".22"/><stop offset="1" stop-color="${col}" stop-opacity="0"/></linearGradient></defs><path d="${d} L${X(rows.length - 1)} ${H} L${X(0)} ${H} Z" fill="url(#agr)"/><path d="${d}" fill="none" stroke="${col}" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>
+      <div class="cx"><span>${day(rows[0].t)} · ${usd(rows[0].c)}</span><span>low ${usd(lo)} · high ${usd(hi)}</span><span>${day(rows[rows.length - 1].t)} · ${usd(rows[rows.length - 1].c)}</span></div>`; }
+
   // ---------------------------------------------------------------- the home page
   const steps = () => `<div class="steps">
-    <div class="card step rv"><div class="viz"><svg viewBox="0 0 320 150"><rect x="26" y="45" width="64" height="64" rx="12" fill="#5b7cfa" stroke="#fff" stroke-width="3"/><text x="58" y="82" text-anchor="middle" font-family="JB" font-weight="800" font-size="14" fill="#0b0f14">NVDA</text>
-      <path class="vz-dash" d="M96 77 H150" stroke="#ffd24d" stroke-width="2.5" fill="none"/><g transform="translate(138 30)">${HOOK().replace('<svg', '<svg width="68" height="86"')}</g><path class="vz-dash" d="M214 77 H246" stroke="#ffd24d" stroke-width="2.5" fill="none"/>
+    <div class="card step rv"><div class="viz"><svg viewBox="0 0 320 150"><clipPath id="vc1"><rect x="34" y="47" width="48" height="48" rx="12"/></clipPath><rect x="26" y="39" width="64" height="64" rx="16" fill="#151c25" stroke="rgba(255,255,255,.16)" stroke-width="1.5"/><image data-logo="NVDA" href="${(assetBy('NVDA') || {}).icon || ''}" x="34" y="47" width="48" height="48" clip-path="url(#vc1)"/><text x="58" y="124" text-anchor="middle" font-family="JB" font-weight="700" font-size="12" fill="#8a94a3">NVDA</text>
+      <path class="vz-dash" d="M96 71 H150" stroke="#ffd24d" stroke-width="2.5" fill="none"/><g transform="translate(138 30)">${HOOK().replace('<svg', '<svg width="68" height="86"')}</g><path class="vz-dash" d="M214 77 H246" stroke="#ffd24d" stroke-width="2.5" fill="none"/>
       <circle cx="276" cy="77" r="27" fill="#ffd24d"/><text x="276" y="82" text-anchor="middle" font-family="JB" font-weight="800" font-size="12" fill="#0b0f14">$YOU</text></svg></div>
       <span class="n">01</span><h3>Hook it</h3><p>Launch a coin and hook it to one real-world asset: a stock, an index, gold or crypto. It's written into the coin's metadata at launch and never changes.</p></div>
     <div class="card step rv d1"><div class="viz"><svg viewBox="0 0 320 150">${[0, 1, 2, 3].map(i => `<g class="vz-drop" style="animation-delay:${i * .4}s"><rect x="${40 + i * 62}" y="22" width="42" height="22" rx="6" fill="rgba(255,255,255,.1)"/><text x="${61 + i * 62}" y="37" text-anchor="middle" font-family="JB" font-size="10" font-weight="700" fill="#ffd24d">1%</text></g>`).join('')}
       <rect x="30" y="96" width="260" height="26" rx="8" fill="rgba(255,255,255,.07)"/><rect class="vz-fill" x="30" y="96" width="260" height="26" rx="8" fill="#ffd24d"/><text x="160" y="140" text-anchor="middle" font-family="JB" font-size="11" fill="#8a94a3">the coin's reserve</text></svg></div>
       <span class="n">02</span><h3>Fill it</h3><p>Every buy and every sell on the curve pays 1%. All of it is counted to that coin's own reserve. Nothing goes to the creator, nothing to hook.</p></div>
-    <div class="card step rv d2"><div class="viz"><svg viewBox="0 0 320 150"><rect x="26" y="45" width="64" height="64" rx="12" fill="#5b7cfa" stroke="#fff" stroke-width="3"/><text x="58" y="74" text-anchor="middle" font-family="JB" font-weight="800" font-size="14" fill="#0b0f14">NVDA</text><text class="vz-up" x="58" y="94" text-anchor="middle" font-family="JB" font-weight="700" font-size="12" fill="#0b0f14">▲ green</text>
-      <path class="vz-dash" d="M96 77 H210" stroke="#3ddc84" stroke-width="2.5" fill="none"/><g class="vz-pull"><circle cx="252" cy="80" r="27" fill="#ffd24d"/><text x="252" y="85" text-anchor="middle" font-family="JB" font-weight="800" font-size="12" fill="#0b0f14">$YOU</text></g>
+    <div class="card step rv d2"><div class="viz"><svg viewBox="0 0 320 150"><clipPath id="vc3"><rect x="34" y="47" width="48" height="48" rx="12"/></clipPath><rect x="26" y="39" width="64" height="64" rx="16" fill="#151c25" stroke="rgba(255,255,255,.16)" stroke-width="1.5"/><image data-logo="NVDA" href="${(assetBy('NVDA') || {}).icon || ''}" x="34" y="47" width="48" height="48" clip-path="url(#vc3)"/><text class="vz-up" x="58" y="124" text-anchor="middle" font-family="JB" font-weight="700" font-size="12" fill="#3ddc84">▲ green</text>
+      <path class="vz-dash" d="M96 71 H210" stroke="#3ddc84" stroke-width="2.5" fill="none"/><g class="vz-pull"><circle cx="252" cy="80" r="27" fill="#ffd24d"/><text x="252" y="85" text-anchor="middle" font-family="JB" font-weight="800" font-size="12" fill="#0b0f14">$YOU</text></g>
       <path class="vz-burn" d="M252 30c3 9 13 13 13 24a13 13 0 0 1-26 0c0-7 4-9 4-15 4 2 6 6 6 10 2-6 3-12 3-19z" fill="#ff7a45"/></svg></div>
       <span class="n">03</span><h3>Pull it</h3><p>On a day the asset is green, the reserve spends the move × your pull, buys your coin and burns it. Once a day, up to half the reserve.</p></div></div>`;
   const FAQ = [
@@ -106,23 +122,23 @@
     ['Where does the money for the burns come from?', 'From the coin\'s own trading. hook is a launchpad on Raydium LaunchLab with a 1% platform fee, and every bit of that 1% is counted to the coin that traded. That\'s its reserve.'],
     ['How much burns on a green day?', 'The asset\'s 24h move × the pull, as a share of the reserve, up to 50%. NVDA up 2% with a 5x pull spends 10% of the reserve. If the asset is flat or red, nothing is spent and the reserve keeps filling.'],
     ['How do I know a burn really happened?', 'Every hook is one Solana transaction: the buy through Jupiter, the burn and a memo naming the coin, the asset and the move. The burn log lists them all, with proof of reserves next to it.'],
-    ['Where do the prices come from?', 'From each asset\'s token on Solana, read from Jupiter: xStocks for stocks, indexes and gold, cbBTC for bitcoin, wrapped ETH and SOL. Dexscreener fills in if Jupiter misses one.'],
-    ['Is this financial advice? Is it affiliated with the companies?', 'No and no. hook doesn\'t own or sell any stock. A hooked coin is a memecoin whose burns follow an asset\'s daily move. It isn\'t affiliated with any company, index or issuer.']];
+    ['Where do the prices come from?', 'From each asset\'s token on Solana, read from Jupiter: xStocks for stocks, indexes and gold, cbBTC for bitcoin, wrapped ETH and SOL. Dexscreener fills in if Jupiter misses one.']];
   const faqHtml = () => `<div class="faq">${FAQ.map(([q, a], i) => `<details class="card qa rv ${i % 2 ? 'd1' : ''}"><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</div>`;
   function home() { return `<div class="wrap herowrap"><div class="hero">
-      <div class="hl"><div class="pill"><i></i><span id="greenPill">reading the markets…</span></div>
-        <h1>launch a coin<br>hooked to<br><span>real&#8209;world assets.</span></h1>
-        <p class="sub">Wall Street pumps, your coin burns.</p>
+      <div class="hl"><h1 class="mega">hook</h1>
+        <p class="sub2">launch a coin hooked to <span>real&#8209;world assets.</span></p>
         <div class="ctas"><a class="btn gold" href="#/launch">Launch a coin</a><button class="btn" data-go="how">How it works</button></div></div>
       <div class="wall" id="wall"></div></div><div class="scrollcue">scroll<i></i></div></div>
     <div class="wrap">
     <section id="how"><div class="shead rv"><div><span class="kick">how it works</span><h2>Three steps. <em>One signature.</em></h2></div><a class="btn" href="#/docs">Read the docs</a></div>${steps()}</section>
+    <section><div class="shead rv"><div><span class="kick">the difference</span><h2>A regular launch <em>vs a hooked one.</em></h2></div></div>
+      <div class="card vs rv"><div class="vr vh"><span></span><span>a regular launch</span><span>a hooked coin</span></div>${[['what drives the buys', 'nothing', 'a real-world asset’s green days'], ['trading fees', 'to the creator or the platform', '1% into the coin’s own reserve'], ['buybacks', 'none, or whenever someone decides', 'every green day, by a fixed rule'], ['what it buys', '—', 'burned in the same transaction'], ['the rule', 'can change', 'written into the coin at launch'], ['proof', '—', 'every hook is one public transaction']].map(r => `<div class="vr"><span>${r[0]}</span><span>${r[1]}</span><span>${r[2]}</span></div>`).join('')}</div></section>
     <section><div class="shead rv"><div><span class="kick">the pull</span><h2>Try it on <em>today's market.</em></h2><p class="lede">Live 24h moves. Pick an asset and a pull and see what its reserve would spend today.</p></div></div>
       <div class="card calc rv"><div class="l">
         <div class="blk"><div class="lbl">the asset <b id="cA">—</b></div><div class="chips" id="cChips"></div></div>
         <div class="blk"><div class="lbl">the pull <b id="cP">3x</b></div><input type="range" class="rng" id="cPull" min="1" max="10" step="1" value="3" aria-label="pull"><div class="ticks"><span>1x</span><span>5x</span><span>10x</span></div></div>
         <div class="blk" style="margin:0"><div class="lbl">the coin's reserve</div><div style="display:flex;gap:10px;align-items:center"><input class="in" id="cRes" value="1" inputmode="decimal" aria-label="reserve in SOL" style="max-width:160px"><span class="mono mu">SOL</span></div></div></div>
-        <div class="r"><div class="lbl">today's hook would spend</div><div class="out-big" id="cOut">—</div><div class="out-sub" id="cSub"></div><div class="bars" id="cBars"></div></div></div></section>
+        <div class="r"><div class="lbl">today's hook would spend</div><div class="out-big" id="cOut">—</div><div class="out-sub" id="cSub"></div><div class="bars" id="cBars"></div><div id="cBt"></div></div></div></section>
     <section><div class="shead rv"><div><span class="kick">right now</span><h2>Who's green <em>today.</em></h2></div><span class="mono mu" id="mvAt"></span></div>
       <div class="card movers rv"><div class="mvh"><span>asset</span><span>red</span><span>green</span><span>24h</span></div><div id="movers"><div class="empty">reading the markets…</div></div></div></section>
     <section><div class="shead rv"><div><span class="kick">live</span><h2>On hook <em>now.</em></h2></div><a class="btn" href="#/coins">Every coin</a></div>
@@ -139,15 +155,19 @@
   function renderCalc() { const ch = $('#cChips'); if (!ch) return; const A = assetList(); if (!A.length) return;
     if (!CL.sym) CL.sym = ([...A].filter(a => a.ch24 != null).sort((x, y) => y.ch24 - x.ch24)[0] || A[0]).sym;
     const pick = ['NVDA', 'TSLA', 'SPY', 'QQQ', 'AAPL', 'MSTR', 'COIN', 'GOLD', 'BTC', 'ETH', 'SOL']; if (!pick.includes(CL.sym)) pick.unshift(CL.sym);
-    ch.innerHTML = pick.map(s => { const a = assetBy(s); return a ? `<button class="chip ${s === CL.sym ? 'on' : ''}" data-s="${s}">${s} <small class="${s === CL.sym ? '' : cls(a.ch24)}">${spct(a.ch24, 1)}</small></button>` : ''; }).join('');
+    ch.innerHTML = pick.map(s => { const a = assetBy(s); return a ? `<button class="chip ${s === CL.sym ? 'on' : ''}" data-s="${s}">${logo(s, 18, 5)}${s} <small class="${s === CL.sym ? '' : cls(a.ch24)}">${spct(a.ch24, 1)}</small></button>` : ''; }).join('');
     const a = assetBy(CL.sym), p = spendPct(a && a.ch24, CL.pull), r = $('#cPull'); r.style.setProperty('--p', (CL.pull - 1) / 9 * 100 + '%'); setT('#cA', a ? a.name : '—'); setT('#cP', CL.pull + 'x');
     setT('#cOut', p > 0 ? p.toFixed(p < 10 ? 2 : 1) + '%' : '0%'); $('#cOut').style.color = p > 0 ? 'var(--gold)' : 'var(--mu)';
     $('#cSub').innerHTML = !a || a.ch24 == null ? 'reading the price…' : p > 0 ? `${esc(a.sym)} is <b class="up">${spct(a.ch24)}</b> in 24h. × ${CL.pull} = <b>${p.toFixed(2)}%</b>${p >= CAPP() ? ' (the cap)' : ''} of the reserve: <b>${num(CL.res * p / 100, 4)} SOL</b> buys the coin and burns it.` : `${esc(a.sym)} is <b class="${cls(a.ch24)}">${spct(a.ch24)}</b> in 24h. Not a green day: nothing is spent, the reserve keeps filling.`;
     const bars = Array.from({ length: 10 }, (_, i) => { const v = spendPct(a && a.ch24, i + 1); return `<i class="${i + 1 === CL.pull ? 'on' : ''}" style="height:${Math.max(2, v / CAPP() * 100)}%"><em>${i + 1}x</em></i>`; }).join('');
-    $('#cBars').innerHTML = bars + `<div class="cap" style="top:18px"><span>cap ${CAPP()}%</span></div>`; }
+    $('#cBars').innerHTML = bars + `<div class="cap" style="top:18px"><span>cap ${CAPP()}%</span></div>`; calcHist(); }
+  async function calcHist() { const el = $('#cBt'); if (!el || !CL.sym) return; const sym = CL.sym, pull = CL.pull, key = sym + pull; if (el._k === key) return;
+    try { const h = await hist(sym); if (CL.sym !== sym || CL.pull !== pull || !$('#cBt')) return; const bt = backtest(h.rows, pull); el._k = key;
+      el.innerHTML = `<div class="lbl" style="margin:30px 0 10px">${esc(sym)} · the last 30 days <b>${bt.hooks} hook day${bt.hooks === 1 ? '' : 's'}</b></div>${stripHtml(bt)}<p class="mono mu" style="font-size:12px;margin:10px 0 0">${bt.hooks ? `at ${pull}x: avg ${bt.avg.toFixed(1)}% per hook · biggest ${bt.max.toFixed(1)}%` : 'no green day in the last 30'} · daily closes, GeckoTerminal</p>`; }
+    catch (e) { el.innerHTML = '<p class="mono mu" style="font-size:12px;margin-top:22px">30-day history unavailable right now</p>'; } }
   function renderMovers() { const el = $('#movers'); if (!el) return; const A = assetList().filter(a => a.ch24 != null).sort((x, y) => y.ch24 - x.ch24); if (!A.length) return;
     const mx = Math.max(1, ...A.map(a => Math.abs(a.ch24)));
-    el.innerHTML = A.map(a => `<a class="mv" href="#/a/${a.sym}"><span class="nm"><i style="background:${colOf(a.sym)}"></i><b>${esc(a.sym)}</b></span><span class="neg"><i style="width:${a.ch24 < 0 ? Math.abs(a.ch24) / mx * 100 : 0}%"></i></span><span class="pos"><i style="width:${a.ch24 > 0 ? a.ch24 / mx * 100 : 0}%"></i></span><span class="v ${cls(a.ch24)}">${spct(a.ch24)}</span></a>`).join('');
+    el.innerHTML = A.map(a => `<a class="mv" href="#/a/${a.sym}"><span class="nm">${logo(a.sym, 20, 6)}<b>${esc(a.sym)}</b></span><span class="neg"><i style="width:${a.ch24 < 0 ? Math.abs(a.ch24) / mx * 100 : 0}%"></i></span><span class="pos"><i style="width:${a.ch24 > 0 ? a.ch24 / mx * 100 : 0}%"></i></span><span class="v ${cls(a.ch24)}">${spct(a.ch24)}</span></a>`).join('');
     setT('#mvAt', `${A.filter(a => a.ch24 >= MINM()).length} green · ${A.filter(a => a.ch24 < MINM()).length} not · Jupiter, 24h`); }
   function renderStats() { const el = $('#stats'); if (!el) return; const c = S.coins, T = c && c.totals;
     const cell = (k, v, e) => `<div class="card stat"><small>${k}</small><b>${v}</b><em>${e}</em></div>`;
@@ -190,7 +210,7 @@
   function renderPick() { const el = $('#apick'); if (!el) return; const A = assetList(); if (!A.length) { el.innerHTML = '<div class="empty" style="grid-column:1/-1">reading the markets…</div>'; return; }
     if (!LN.asset) LN.asset = 'NVDA';
     const L = A.filter(a => (LN.kind === 'all' || a.kind === LN.kind) && (!LN.q || (a.sym + ' ' + a.name).toLowerCase().includes(LN.q)));
-    el.innerHTML = L.length ? L.map(a => `<button class="ap ${a.sym === LN.asset ? 'on' : ''}" data-s="${a.sym}" style="background:${colOf(a.sym)}"><b>${esc(a.sym)}</b><small>${esc(a.name)}</small><span>${spct(a.ch24, 2)}</span></button>`).join('') : '<div class="empty" style="grid-column:1/-1">No asset matches.</div>'; }
+    el.innerHTML = L.length ? L.map(a => `<button class="ap ${a.sym === LN.asset ? 'on' : ''}" data-s="${a.sym}">${logo(a.sym, 30, 9)}<b>${esc(a.sym)}</b><small>${esc(a.name)}</small><span class="${cls(a.ch24)}">${spct(a.ch24, 2)}</span></button>`).join('') : '<div class="empty" style="grid-column:1/-1">No asset matches.</div>'; }
   function renderLaunch() { const pv = $('#prev'); if (!pv) return; const custom = /^https:\/\//.test(LN.img) || LN.img[0] === 'b'; $$('#imgs button').forEach(b => b.classList.toggle('on', !custom && b.dataset.i === LN.img));
     const a = assetBy(LN.asset), name = $('#cName').value.trim() || 'Your coin', sym = $('#cSym').value.trim() || 'TICKER', src = LN.img[0] === 'b' ? LN.imgUrl : custom ? LN.img : `/coins/${/^[1-6]$/.test(LN.img) ? LN.img : 1}.png`, p = spendPct(a && a.ch24, LN.pull);
     const r = $('#lPull'); r.value = LN.pull; r.style.setProperty('--p', (LN.pull - 1) / 9 * 100 + '%'); setT('#lPullV', LN.pull + 'x');
@@ -218,15 +238,37 @@
     <p class="mono mu" style="font-size:12px;margin-top:14px">Prices: Jupiter, from each asset's token on Solana (xStocks for stocks, indexes and gold · cbBTC · wrapped ETH · SOL). Dexscreener fills gaps.</p></div>`; }
   function renderAssets() { const el = $('#asRows'); if (!el) return; const A = assetList().filter(a => AS.kind === 'all' || a.kind === AS.kind); if (!A.length) return; const mx = Math.max(1, ...assetList().map(a => Math.abs(a.ch24 || 0)));
     el.innerHTML = A.map(a => { const n = coinList().filter(c => c.asset === a.sym).length, g = a.ch24 != null && a.ch24 >= MINM(), w = Math.abs(a.ch24 || 0) / mx * 50;
-      return `<a class="tr" href="#/a/${a.sym}"><span class="nm">${sq(a.sym)}<span><b>${esc(a.sym)}</b><small>${esc(a.name)} · ${esc(a.tok)}</small></span></span><span>${usd(a.usd)}</span><span class="mbar"><i style="${a.ch24 >= 0 ? `left:50%;width:${w}%;background:var(--up)` : `right:50%;width:${w}%;background:var(--dn)`}"></i></span><span class="${cls(a.ch24)}">${spct(a.ch24)}</span><span>${n}</span><span class="st ${g ? 'armed' : 'filling'}">${a.ch24 == null ? 'no price' : g ? 'hook day' : 'filling'}</span></a>`; }).join(''); }
+      return `<a class="tr" href="#/a/${a.sym}"><span class="nm">${logo(a.sym, 38, 11)}<span><b>${esc(a.sym)}</b><small>${esc(a.name)} · ${esc(a.tok)}</small></span></span><span>${usd(a.usd)}</span><span class="mbar"><i style="${a.ch24 >= 0 ? `left:50%;width:${w}%;background:var(--up)` : `right:50%;width:${w}%;background:var(--dn)`}"></i></span><span class="${cls(a.ch24)}">${spct(a.ch24)}</span><span>${n}</span><span class="st ${g ? 'armed' : 'filling'}">${a.ch24 == null ? 'no price' : g ? 'hook day' : 'filling'}</span></a>`; }).join(''); }
   function assetPage(sym) { const a = assetBy(sym); if (!a) return `<div class="wrap"><div class="card empty" style="margin-top:40px">${assetList().length ? 'Not an asset on hook. <a href="#/assets">See all assets →</a>' : 'reading the markets…'}</div></div>`;
     const C = coinList().filter(c => c.asset === sym), E = ((S.ledger && S.ledger.entries) || []).filter(e => e.asset === sym), g = a.ch24 != null && a.ch24 >= MINM();
-    return `<div class="wrap"><div class="card chead"><span class="big" style="background:${colOf(sym)}">${esc(sym)}</span><div><h1>${esc(a.name)} <span>${esc(sym)}</span></h1><p>${g ? `Green today. Every coin hooked to ${esc(sym)} can burn.` : `Not a green day for ${esc(sym)}. Coins hooked to it keep filling.`}</p>
+    return `<div class="wrap"><div class="card chead"><span class="bigl">${logo(sym, 84, 22)}</span><div><h1>${esc(a.name)} <span>${esc(sym)}</span></h1><p>${g ? `Green today. Every coin hooked to ${esc(sym)} can burn.` : `Not a green day for ${esc(sym)}. Coins hooked to it keep filling.`}</p>
       <div class="meta"><span>${esc(a.tok)} on Solana</span><a href="https://solscan.io/token/${a.mint}" target="_blank" rel="noopener">token ↗</a><span>price from ${esc(a.src || '—')}</span></div></div><div class="act"><a class="btn gold" href="#/launch/${sym}">Hook a coin to ${esc(sym)}</a></div></div>
       <div class="kv4"><div class="card"><small>price</small><b>${usd(a.usd)}</b><em>${esc(a.tok)}</em></div><div class="card"><small>24h</small><b class="${cls(a.ch24)}">${spct(a.ch24)}</b><em>${g ? 'hook day' : 'filling'}</em></div><div class="card"><small>coins hooked</small><b>${C.length}</b><em>on hook</em></div><div class="card"><small>reserves hooked</small><b>${num(C.reduce((s, c) => s + c.reserve.sol, 0), 3)} SOL</b><em>${E.length} burns so far</em></div></div>
+      <div class="cgrid" style="margin-bottom:16px"><div class="card chart"><div class="cth"><span>${esc(a.tok)} · daily closes · GeckoTerminal</span><span id="aChg"></span></div><div id="aChart" class="achart"><div class="empty" style="margin:auto">reading the history…</div></div></div>
+        <div class="card hookcard"><span class="note">hook history · last 30 days</span><div class="seg" id="aPull" style="margin:12px 0 6px;align-self:flex-start">${[1, 3, 5, 10].map(p => `<button data-p="${p}" class="${p === AP.pull ? 'on' : ''}">${p}x</button>`).join('')}</div><div id="aBt"><div class="empty">reading…</div></div></div></div>
       <div class="card" style="margin-bottom:16px"><div class="ch"><h3>Today, by pull</h3><span>share of a reserve one hook spends</span></div><div class="tbl"><div class="tr h" style="grid-template-columns:repeat(5,1fr);min-width:0"><span>1x</span><span>3x</span><span>5x</span><span>7x</span><span>10x</span></div><div class="tr" style="grid-template-columns:repeat(5,1fr);min-width:0">${[1, 3, 5, 7, 10].map(p => `<b class="${spendPct(a.ch24, p) ? 'gd' : 'mu'}">${spendPct(a.ch24, p).toFixed(2)}%</b>`).join('')}</div></div></div>
       <div class="two"><div class="card"><div class="ch"><h3>Coins hooked to ${esc(sym)}</h3><span>${C.length}</span></div><div class="rows">${C.length ? C.slice(0, 12).map(coinRow).join('') : `<div class="empty">No coins hooked to ${esc(sym)} yet. <a class="gd" href="#/launch/${sym}">Be the first →</a></div>`}</div></div>
         <div class="card"><div class="ch"><h3>Burns from ${esc(sym)}</h3><span>${E.length}</span></div><div class="rows">${E.length ? E.slice(0, 12).map(burnRow).join('') : '<div class="empty">No burns from this asset yet.</div>'}</div></div></div></div>`; }
+
+  const AP = { pull: 5 };
+  async function assetInit(sym) { const a = assetBy(sym); if (!a || !$('#aChart')) return; $('#aPull').onclick = e => { const b = e.target.closest('button'); if (!b) return; AP.pull = +b.dataset.p; $$('#aPull button').forEach(x => x.classList.toggle('on', x === b)); draw(); };
+    let h = null; const draw = () => { if (!h || !$('#aBt')) return; const bt = backtest(h.rows, AP.pull);
+      $('#aBt').innerHTML = `<div class="big2 ${bt.hooks ? 'gd' : 'mu'}">${bt.hooks}<span class="mu" style="font-size:22px"> / ${bt.days.length} days</span></div><span class="mono mu">would have been hook days</span>
+        <ul class="rules" style="margin:14px 0"><li>average hook<b>${bt.avg.toFixed(2)}% of the reserve</b></li><li>biggest hook<b>${bt.max.toFixed(2)}%</b></li><li>with no new fees, spent<b>${bt.spent.toFixed(1)}% of a reserve</b></li></ul>${stripHtml(bt)}`; };
+    try { h = await hist(sym); if (!$('#aChart')) return; const R2 = h.rows.slice(-90); $('#aChart').innerHTML = lineSvg(R2); if (R2.length > 1) { const c = (R2[R2.length - 1].c / R2[0].c - 1) * 100; $('#aChg').innerHTML = `<span class="${cls(c)}">${spct(c)}</span> over ${R2.length} days`; } draw(); }
+    catch (e) { if ($('#aChart')) $('#aChart').innerHTML = `<div class="empty" style="margin:auto">History unavailable right now.</div>`; if ($('#aBt')) $('#aBt').innerHTML = '<div class="empty">—</div>'; } }
+
+  // ---------------------------------------------------------------- leaderboards
+  const TP = { tab: 'reserve' };
+  const topPage = () => `<div class="wrap"><div class="phd"><div><span class="kick">top</span><h1>Leaderboards.</h1><p>The biggest reserves, the most burned, the most hooked assets and the busiest creators. All read live.</p></div><div class="seg" id="tpSeg">${[['reserve', 'reserves'], ['burned', 'burned'], ['mcap', 'market cap'], ['assets', 'assets'], ['creators', 'creators']].map(([k, l]) => `<button data-k="${k}" class="${TP.tab === k ? 'on' : ''}">${l}</button>`).join('')}</div></div><div class="card rows" id="tpList"><div class="empty">reading…</div></div></div>`;
+  function renderTop() { const el = $('#tpList'); if (!el) return; const C = coinList(), rk = i => `<span class="rk">${i + 1}</span>`;
+    if (TP.tab === 'assets') { if (!assetList().length) return; const A = assetList().map(a => { const m = C.filter(c => c.asset === a.sym); return { a, n: m.length, r: m.reduce((x, c) => x + c.reserve.sol, 0) }; }).sort((x, y) => y.n - x.n || y.r - x.r || (y.a.ch24 || 0) - (x.a.ch24 || 0));
+      el.innerHTML = A.map((x, i) => `<a class="rw rk4" href="#/a/${x.a.sym}">${rk(i)}${logo(x.a.sym, 40, 11)}<span><b>${esc(x.a.sym)}</b> <span class="mu">${esc(x.a.name)}</span><small>${x.n} coin${x.n === 1 ? '' : 's'} hooked · ${num(x.r, 3)} SOL in their reserves</small></span><span class="r ${cls(x.a.ch24)}">${spct(x.a.ch24)}<small>24h</small></span></a>`).join(''); return; }
+    if (!S.coins) return; if (!S.coins.open) { el.innerHTML = '<div class="empty">The launchpad opens soon. The first coins and creators rank here.</div>'; return; }
+    if (TP.tab === 'creators') { const by = {}; C.forEach(c => { if (!c.creator) return; const b = by[c.creator] = by[c.creator] || { w: c.creator, n: 0, r: 0, mc: 0 }; b.n++; b.r += c.reserve.sol; b.mc += c.mcapUsd || 0; }); const L = Object.values(by).sort((x, y) => y.n - x.n || y.mc - x.mc), P = Object.fromEntries((S.profiles || []).map(p => [p.wallet, p]));
+      el.innerHTML = L.length ? L.map((x, i) => `<a class="rw rk4" href="#/u/${x.w}">${rk(i)}<span class="av" style="width:40px;height:40px;border-radius:11px">${avatarHtml(P[x.w], x.w)}</span><span><b>${esc(P[x.w] ? P[x.w].name : short(x.w))}</b><small>${x.n} coin${x.n === 1 ? '' : 's'} launched · ${num(x.r, 3)} SOL in reserves</small></span><span class="r">${big(x.mc)}<small>total market cap</small></span></a>`).join('') : '<div class="empty">No creators yet. Launch the first coin.</div>'; return; }
+    const k = { reserve: c => c.reserve.sol, burned: c => c.burned, mcap: c => c.mcapUsd || 0 }[TP.tab], L = [...C].sort((x, y) => k(y) - k(x)).slice(0, 50);
+    el.innerHTML = L.length ? L.map((c, i) => `<a class="rw rk4" href="#/c/${c.mint}">${rk(i)}<img class="ic" src="${esc(c.image || '/coins/1.png')}" alt="" onerror="this.src='/coins/1.png'"><span><b>${esc(c.name)}</b> <span class="mu mono">$${esc(c.symbol)}</span><small>${c.asset ? `hooked to ${esc(c.asset)} · ${c.pull}x · ` : ''}${c.hooks} hook${c.hooks === 1 ? '' : 's'}</small></span><span class="r">${TP.tab === 'reserve' ? num(c.reserve.sol, 4) + ' SOL' : TP.tab === 'burned' ? kfmt(c.burned) : big(c.mcapUsd)}<small>${TP.tab === 'reserve' ? 'reserve' : TP.tab === 'burned' ? 'tokens burned' : 'market cap'}</small></span></a>`).join('') : '<div class="empty">No coins yet. Launch the first.</div>'; }
 
   // ---------------------------------------------------------------- coins board
   const BD = { q: '', st: 'all', asset: '', sort: 'new' };
@@ -374,21 +416,23 @@
   // ---------------------------------------------------------------- router + glue
   function reveals() { if (RM) { $$('.rv').forEach(e => e.classList.add('shown')); return; } const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('shown'); io.unobserve(e.target); } }), { rootMargin: '0px 0px -6% 0px' }); $$('.rv:not(.shown)').forEach(e => io.observe(e)); }
   let cur = null, view = 'home';
-  const PAGES = { home, launch: launchPage, assets: assetsPage, a: assetPage, coins: coinsPage, burns: burnsPage, trade: tradePage, docs: docsPage };
+  const PAGES = { home, launch: launchPage, assets: assetsPage, a: assetPage, coins: coinsPage, top: topPage, burns: burnsPage, trade: tradePage, docs: docsPage };
+  let ARG = '';
   function render() { const h = location.hash || '#/', parts = h.slice(2).split('/'), v0 = parts[0] || 'home', arg = parts[1] ? decodeURIComponent(parts[1]) : ''; const v = PAGES[v0] || ['c', 'u', 'console'].includes(v0) ? v0 : 'home'; view = v;
     document.body.classList.toggle('home', v === 'home'); onScroll();
-    const nav = { a: 'assets', c: 'coins' }[v] || v; $$('#dock a').forEach(a => a.classList.toggle('on', a.dataset.v === nav));
-    const key = v + ':' + arg; if (key === cur) return; cur = key;
+    const nav = { a: 'assets', c: 'coins', u: 'top' }[v] || v; $$('#dock a').forEach(a => a.classList.toggle('on', a.dataset.v === nav));
+    const key = v + ':' + arg; if (key === cur) return; cur = key; ARG = arg.toUpperCase();
     scrollTo({ top: 0 }); app().classList.remove('pgin'); void app().offsetWidth; app().classList.add('pgin');
     if (v === 'u') return profilePage(arg); if (v === 'c') return coinPage(arg); if (v === 'console') return consolePage();
-    app().innerHTML = PAGES[v](arg.toUpperCase()); reveals(); pageInit(v); }
+    app().innerHTML = PAGES[v](arg.toUpperCase()); reveals(); pageInit(v); fillLogos(); }
   function pageInit(v) { if (v === 'home') { renderWall(); renderPill(); calcInit(); renderMovers(); renderStats(); renderLive(); $$('[data-go]').forEach(b => b.onclick = () => { const s = $('#' + b.dataset.go); if (s) scrollTo({ top: s.getBoundingClientRect().top + scrollY - 60, behavior: RM ? 'auto' : 'smooth' }); }); }
     if (v === 'launch') launchInit(); if (v === 'assets') { renderAssets(); $('#asSeg').onclick = e => { const b = e.target.closest('button'); if (!b) return; AS.kind = b.dataset.k; $$('#asSeg button').forEach(x => x.classList.toggle('on', x === b)); renderAssets(); }; }
+    if (v === 'a') assetInit(ARG); if (v === 'top') { $('#tpSeg').onclick = e => { const b = e.target.closest('button'); if (!b) return; TP.tab = b.dataset.k; $$('#tpSeg button').forEach(x => x.classList.toggle('on', x === b)); renderTop(); }; renderTop(); loadSocial().then(renderTop); }
     if (v === 'coins') coinsInit(); if (v === 'trade') tradeInit($('[data-trade="page"]')); if (v === 'burns') renderBurns(); if (v === 'docs') docsInit(); }
   function onScroll() { document.body.classList.toggle('top', view === 'home' && scrollY < innerHeight * .45); }
   // live refresh: re-render only the parts that read live data, never the inputs someone is typing in
   function refresh() { renderTape(); if (view === 'home') { renderWall(); renderPill(); renderCalc(); renderMovers(); renderStats(); renderLive(); }
-    if (view === 'launch') { renderPick(); renderLaunch(); } if (view === 'assets') renderAssets(); if (view === 'coins') renderBoard(); if (view === 'burns') renderBurns(); if (view === 'console' && consolePage.table) consolePage.table();
+    if (view === 'launch') { renderPick(); renderLaunch(); } if (view === 'assets') renderAssets(); if (view === 'coins') renderBoard(); if (view === 'burns') renderBurns(); if (view === 'top') renderTop(); if (view === 'console' && consolePage.table) consolePage.table(); fillLogos();
     $$('[data-trade]').forEach(el => el._picks && el._picks()); }
   addEventListener('hashchange', render); addEventListener('scroll', onScroll, { passive: true });
   walletInit(); render();
