@@ -7,5 +7,6 @@ Every coin launches on the hook launchpad on Raydium LaunchLab, hooked to one as
 - `index.html`, `assets/` — the site
 - `api/hook.js` — the API (Vercel function): prices, coins, launches, hooks, profiles
 - `api/hook-config.json` — the assets and the rules
+- Pages: home, launch, assets (with 120-day history and hook backtests), coins, leaderboards, burns + proof of reserves, trade, docs, profiles, console
 
 Not financial advice. Not affiliated with any company, index, issuer, Raydium or Jupiter.
