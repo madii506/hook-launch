@@ -125,7 +125,7 @@
     ['Where do the prices come from?', 'From each asset\'s token on Solana, read from Jupiter: xStocks for stocks, indexes and gold, cbBTC for bitcoin, wrapped ETH and SOL. Dexscreener fills in if Jupiter misses one.']];
   const faqHtml = () => `<div class="faq">${FAQ.map(([q, a], i) => `<details class="card qa rv ${i % 2 ? 'd1' : ''}"><summary>${esc(q)}</summary><p>${esc(a)}</p></details>`).join('')}</div>`;
   function home() { return `<div class="wrap herowrap"><div class="hero">
-      <div class="hl"><h1 class="mega">hook</h1>
+      <div class="hl"><h1 class="mega" aria-label="hook"><i>h</i><i>o</i><i>o</i><i>k</i></h1>
         <p class="sub2">launch a coin hooked to <span>real&#8209;world assets.</span></p>
         <div class="ctas"><a class="btn gold" href="#/launch">Launch a coin</a><button class="btn" data-go="how">How it works</button></div></div>
       <div class="wall" id="wall"></div></div><div class="scrollcue">scroll<i></i></div></div>

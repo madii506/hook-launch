@@ -436,3 +436,12 @@ a.tr:hover{background:rgba(255,255,255,.025)}
 .rows .rw.rk4{grid-template-columns:26px 40px 1fr auto}
 .rk{font:700 13px/1 JB;color:var(--mu2);text-align:center}
 @media (max-width:640px){.at b{display:none}.hero h1.mega{font-size:96px}.hero .sub2{font-size:26px}.vs .vr{grid-template-columns:1fr 1fr;padding:14px 16px}.vs .vr span:first-child{grid-column:1/-1}.vs .vh span:first-child{display:none}.strip{gap:2px}.at{padding:5px;border-radius:10px}.at b{font-size:8px}.at span{font-size:7.5px;line-height:1.3}.ap{min-height:96px}}
+
+/* the header flickers like an old sign: no glow, just the light dropping out */
+.hero h1.mega i{font-style:normal;display:inline-block;animation:flk 7s steps(1,end) infinite}
+.hero h1.mega i:nth-child(2){animation-name:flk2;animation-duration:5.3s}
+.hero h1.mega i:nth-child(3){animation-name:flk3;animation-duration:9.1s}
+.hero h1.mega i:nth-child(4){animation-name:flk;animation-delay:-3.2s;animation-duration:8.4s}
+@keyframes flk{0%,100%{opacity:1}12%{opacity:.18}12.6%{opacity:1}13.4%{opacity:.4}14%{opacity:1}61%{opacity:.25}61.5%{opacity:1}}
+@keyframes flk2{0%,100%{opacity:1}31%{opacity:.12}31.8%{opacity:.85}32.4%{opacity:.2}33.2%{opacity:1}80%{opacity:.45}80.6%{opacity:1}}
+@keyframes flk3{0%,100%{opacity:1}5%{opacity:.3}5.4%{opacity:1}46%{opacity:.08}46.4%{opacity:.7}47%{opacity:.15}48%{opacity:1}88%{opacity:.5}88.5%{opacity:1}}
